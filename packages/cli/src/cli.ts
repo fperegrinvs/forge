@@ -118,8 +118,10 @@ export function buildCli(): Command {
       }
     });
 
-  program
-    .command("scaffold module <module-name>")
+  const scaffold = program.command("scaffold");
+
+  scaffold
+    .command("module <module-name>")
     .option("--with-contract-test", "create contract test", true)
     .option("--without-contract-test", "skip contract test")
     .option("--with-property-test", "create property test", true)
