@@ -10,14 +10,12 @@ import {
   packsCheckUpdates,
   packsDownload,
   packsListInstalled,
-  pauseRun,
   planValidate,
   plansList,
   plansStatus,
   projectGetGuidanceStatus,
   projectInit,
   projectInstallGuidance,
-  resumeRun,
   runNext,
   selectFolder
 } from "./useControlPlane";
@@ -240,17 +238,4 @@ describe("useControlPlane", () => {
     expect(result.tasks[0]!.state).toBe("completed");
   });
 
-  it("calls pause and resume", async () => {
-    // Given pause and resume succeed
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => true })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: "completed", runId: "run-1", message: "ok" }) });
-
-    // When pause and resume are requested
-    expect(await pauseRun("run-1")).toBe(true);
-    const resumed = await resumeRun("/tmp/project", "/tmp/plan.json", "run-1", "codex");
-
-    // Then resume returns a run result
-    expect(resumed.state).toBe("completed");
-  });
 });

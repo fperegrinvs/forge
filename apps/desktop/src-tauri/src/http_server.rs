@@ -221,64 +221,6 @@ async fn run_next(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ResumeRunRequest {
-    project_root: String,
-    plan_path: String,
-    run_id: String,
-    adapter: String,
-}
-
-async fn resume_run(
-    State(state): State<ServerState>,
-    Json(body): Json<ResumeRunRequest>,
-) -> Result<Json<RunNextResult>, (StatusCode, String)> {
-    let app = state.app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(body.project_root);
-        let args = vec![
-            "run".to_string(),
-            "resume".to_string(),
-            "--plan".to_string(),
-            body.plan_path,
-            "--run-id".to_string(),
-            body.run_id,
-            "--adapter".to_string(),
-            body.adapter,
-            "--json".to_string(),
-        ];
-
-        let value = run_forge_json(&app, &cwd, &args)?;
-        Ok::<_, String>(RunNextResult {
-            state: value
-                .get("state")
-                .and_then(|v| v.as_str())
-                .unwrap_or("failed")
-                .to_string(),
-            task_id: value.get("taskId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            run_id: value.get("runId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            external_run_id: value
-                .get("externalRunId")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            resume_command: value
-                .get("resumeCommand")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            message: value
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Resume")
-                .to_string(),
-        })
-    })
-    .await
-    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
-    .map(Json)
-    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct EvidenceQuery {
     project_root: String,
     task_id: String,
@@ -701,11 +643,6 @@ async fn plans_status(
     .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
 }
 
-async fn pause_run(Json(_body): Json<serde_json::Value>) -> impl IntoResponse {
-    // v1: pause is filesystem-mediated via the control-plane state; CLI pause isn't exposed yet.
-    Json(true)
-}
-
 async fn terminal_spawn(
     State(state): State<ServerState>,
     Json(config): Json<crate::terminal::SpawnConfig>,
@@ -886,8 +823,6 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/debug/status", get(debug_status))
         .route("/api/plan/validate", post(plan_validate))
         .route("/api/run/next", post(run_next))
-        .route("/api/run/resume", post(resume_run))
-        .route("/api/run/pause", post(pause_run))
         .route("/api/evidence", get(get_evidence))
         .route("/api/project/guidance-status", get(project_get_guidance_status))
         .route("/api/packs/installed", get(packs_list_installed))

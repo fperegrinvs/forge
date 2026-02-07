@@ -11,7 +11,7 @@
         </div>
 
         <CreateProjectDialog v-model="showCreateProject" @created="onProjectCreated" />
-        <NewPlanDialog v-model="showNewPlan" :project-root="projectRoot" :adapter="adapter" @plan-created="onPlanCreated" />
+        <NewPlanDialog v-model="showNewPlan" :project-root="projectRoot" :adapter="adapter" :discovered-plans="discoveredPlans" @plan-created="onPlanCreated" />
 
         <v-tabs v-model="tab" class="mb-4">
           <v-tab value="orchestrate">Orchestrate</v-tab>
@@ -51,8 +51,7 @@
                   <div class="d-flex flex-wrap ga-2">
                     <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" @click="showNewPlan = true">New Plan</v-btn>
                     <v-btn color="primary" @click="onValidate">Validate Plan</v-btn>
-                    <v-btn color="primary" variant="outlined" @click="onRunNext">Run Next</v-btn>
-                    <v-btn color="success" variant="outlined" @click="onResume">Resume</v-btn>
+                    <v-btn color="primary" variant="outlined" @click="onRunNext">Run</v-btn>
                     <v-btn color="secondary" variant="outlined" @click="onOpenEvidence">Open Evidence</v-btn>
                   </div>
                 </v-card>
@@ -94,6 +93,15 @@
                 <v-card class="pa-4 mb-4">
                   <h2 class="text-h6 mb-2">Gate Results</h2>
                   <p>{{ validationSummary }}</p>
+                  <v-list v-if="selectedPlanIssues.length" density="compact" class="mt-2">
+                    <v-list-item
+                      v-for="(issue, index) in selectedPlanIssues"
+                      :key="index"
+                      prepend-icon="mdi-alert-circle-outline"
+                      :title="issue.message"
+                      :subtitle="`${issue.path} (${issue.code})`"
+                    />
+                  </v-list>
                 </v-card>
 
                 <v-card class="pa-4">
@@ -205,14 +213,14 @@ import {
   plansStatus,
   projectGetGuidanceStatus,
   projectInstallGuidance,
-  resumeRun,
   runNext,
   selectFolder,
   type InstalledPack,
   type PlanFileEntry,
   type ProjectGuidanceStatus,
   type RunNextResult,
-  type TaskStatus
+  type TaskStatus,
+  type ValidationIssue
 } from "./composables/useControlPlane";
 
 const tab = ref<"orchestrate" | "packs">("orchestrate");
@@ -221,7 +229,6 @@ const showNewPlan = ref(false);
 const adapter = ref<"codex" | "claude">("codex");
 const projectRoot = ref(".");
 const planPath = ref("./plan.json");
-const runId = ref("");
 const validationSummary = ref("No validation run yet");
 const logs = ref<string[]>([]);
 const evidence = ref<string[]>([]);
@@ -245,6 +252,7 @@ type DiscoveredPlan = {
   valid: boolean | null;
   validating: boolean;
   taskStatuses: TaskStatus[];
+  issues: ValidationIssue[];
 };
 
 const discoveredPlans = ref<DiscoveredPlan[]>([]);
@@ -254,6 +262,11 @@ let pollInterval: ReturnType<typeof setInterval> | null = null;
 const selectedPlanStatuses = computed(() => {
   const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
   return selected?.taskStatuses ?? [];
+});
+
+const selectedPlanIssues = computed(() => {
+  const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
+  return selected?.issues ?? [];
 });
 
 onMounted(async () => {
@@ -276,7 +289,7 @@ async function pollPlans(): Promise<void> {
     const updated: DiscoveredPlan[] = entries.map((entry) => {
       const prev = existing.get(entry.filename);
       if (prev) return prev;
-      return { filename: entry.filename, path: entry.path, valid: null, validating: false, taskStatuses: [] };
+      return { filename: entry.filename, path: entry.path, valid: null, validating: false, taskStatuses: [], issues: [] };
     });
     discoveredPlans.value = updated;
 
@@ -287,6 +300,7 @@ async function pollPlans(): Promise<void> {
         planValidate(projectRoot.value, plan.path)
           .then((r) => {
             plan.valid = r.valid;
+            plan.issues = r.issues;
           })
           .catch(() => {
             plan.valid = false;
@@ -391,7 +405,15 @@ function onProjectCreated(newProjectRoot: string): void {
   logs.value.unshift(`Project created: ${newProjectRoot}`);
 }
 
-function onPlanCreated(): void {
+function onPlanCreated(planPathArg?: string): void {
+  if (planPathArg) {
+    const match = discoveredPlans.value.find((p) => p.path === planPathArg);
+    if (match) {
+      onSelectPlan(match);
+      logs.value.unshift(`Plan created and selected: ${match.filename}`);
+      return;
+    }
+  }
   logs.value.unshift("Plan created via guided flow — validate to load");
 }
 
@@ -399,6 +421,11 @@ async function onValidate(): Promise<void> {
   try {
     const result = await planValidate(projectRoot.value, planPath.value);
     validationSummary.value = result.valid ? "Plan valid" : `Plan invalid (${result.issues.length} issues)`;
+    const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
+    if (selected) {
+      selected.valid = result.valid;
+      selected.issues = result.issues;
+    }
     logs.value.unshift(`Validate Plan -> ${validationSummary.value}`);
   } catch (error) {
     validationSummary.value = "Plan validation failed";
@@ -412,28 +439,9 @@ async function onRunNext(): Promise<void> {
     current.state = result.state;
     current.taskId = result.taskId;
     current.message = result.message;
-    runId.value = result.runId ?? "";
-    logs.value.unshift(`Run Next -> ${result.message}`);
+    logs.value.unshift(`Run -> ${result.message}`);
   } catch (error) {
-    logs.value.unshift(`Run Next -> error: ${String(error)}`);
-  }
-}
-
-async function onResume(): Promise<void> {
-  if (!runId.value) {
-    logs.value.unshift("Resume -> missing run id");
-    return;
-  }
-
-  try {
-    const result = await resumeRun(projectRoot.value, planPath.value, runId.value, adapter.value);
-    current.state = result.state;
-    current.taskId = result.taskId;
-    current.message = result.message;
-    runId.value = result.runId ?? runId.value;
-    logs.value.unshift(`Resume -> ${result.message}`);
-  } catch (error) {
-    logs.value.unshift(`Resume -> error: ${String(error)}`);
+    logs.value.unshift(`Run -> error: ${String(error)}`);
   }
 }
 

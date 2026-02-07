@@ -65,15 +65,14 @@ export class ForgeControlPlane {
     this.evidenceRoot = join(this.workspaceRoot, ".forge", "evidence");
   }
 
-  async planValidate(planPath: string, checkRoot = join(this.workspaceRoot, "checks", "task-types")) {
+  async planValidate(planPath: string) {
     const plan = await loadPlan(planPath);
     const schema = await validatePlanSchema(plan);
     if (!schema.valid) {
       return schema;
     }
 
-    const registry = await loadTaskTypeRegistry(checkRoot);
-    const graph = validatePlanGraph(plan, new Set(registry.keys()));
+    const graph = validatePlanGraph(plan);
     if (!graph.valid) {
       return graph;
     }
@@ -86,7 +85,7 @@ export class ForgeControlPlane {
     adapterType: AdapterType,
     checkRoot = join(this.workspaceRoot, "checks", "task-types")
   ): Promise<RunNextResult> {
-    const validation = await this.planValidate(planPath, checkRoot);
+    const validation = await this.planValidate(planPath);
     if (!validation.valid) {
       return {
         state: "failed",
@@ -96,18 +95,19 @@ export class ForgeControlPlane {
 
     const plan = await loadPlan(planPath);
     const state = await this.loadState(planPath, plan.tasks.map((task) => task.id));
-    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
 
+    // Auto-resume: if paused, unlock state so the next task can proceed
+    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
     if (pausedRun) {
-      const resumeCommand = buildResumeCommand(pausedRun.adapterType ?? adapterType, pausedRun.externalRunId);
-      return {
-        state: "paused",
-        runId: pausedRun.runId,
-        ...(pausedRun.taskId ? { taskId: pausedRun.taskId } : {}),
-        ...(pausedRun.externalRunId ? { externalRunId: pausedRun.externalRunId } : {}),
-        ...(resumeCommand ? { resumeCommand } : {}),
-        message: "Execution is paused; resume the run before continuing."
-      };
+      if (pausedRun.taskId && state.tasks[pausedRun.taskId] === "paused") {
+        state.tasks[pausedRun.taskId] = "pending";
+      } else {
+        const pausedTaskId = Object.entries(state.tasks).find(([, s]) => s === "paused")?.[0];
+        if (pausedTaskId) state.tasks[pausedTaskId] = "pending";
+      }
+      delete state.pausedRun;
+      delete state.pausedRunId;
+      await this.saveState(state);
     }
 
     const nextTask = plan.tasks.find(
@@ -117,15 +117,6 @@ export class ForgeControlPlane {
     );
 
     if (!nextTask) {
-      const pausedTaskId = Object.entries(state.tasks).find(([, taskState]) => taskState === "paused")?.[0];
-      if (pausedTaskId) {
-        return {
-          taskId: pausedTaskId,
-          state: "paused",
-          message: "Execution is paused; resume the run before continuing."
-        };
-      }
-
       return {
         state: "completed",
         message: "No runnable tasks remain"

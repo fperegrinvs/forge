@@ -72,18 +72,6 @@ export async function runNext(projectRoot: string, planPath: string, adapter: "c
   });
 }
 
-export async function resumeRun(
-  projectRoot: string,
-  planPath: string,
-  runId: string,
-  adapter: "codex" | "claude"
-): Promise<RunNextResult> {
-  return await apiJson<RunNextResult>("/api/run/resume", {
-    method: "POST",
-    body: JSON.stringify({ projectRoot, planPath, runId, adapter })
-  });
-}
-
 export async function getEvidence(projectRoot: string, taskId: string): Promise<string[]> {
   const url = new URL("/api/evidence", window.location.origin);
   url.searchParams.set("projectRoot", projectRoot);
@@ -175,9 +163,3 @@ export async function plansStatus(projectRoot: string, planPath: string): Promis
   return await apiJson<PlanStatusResult>(url.toString(), { method: "GET" });
 }
 
-export async function pauseRun(runId: string): Promise<boolean> {
-  return await apiJson<boolean>("/api/run/pause", {
-    method: "POST",
-    body: JSON.stringify({ runId })
-  });
-}
