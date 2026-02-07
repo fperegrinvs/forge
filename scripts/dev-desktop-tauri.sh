@@ -66,6 +66,10 @@ if [[ "$ONESHOT" == "1" ]]; then
       FILTERED+=("$arg")
     fi
   done
-  set -- "${FILTERED[@]}"
+  if (( ${#FILTERED[@]} )); then
+    set -- "${FILTERED[@]}"
+  else
+    set --
+  fi
 fi
 exec cargo tauri dev "$@"
