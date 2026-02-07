@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,11 +37,14 @@ pub struct ResizeRequest {
     pub rows: u16,
 }
 
+const SESSION_TIMEOUT: Duration = Duration::from_secs(30 * 60); // 30 minutes
+
 struct Session {
     _child: Box<dyn portable_pty::Child + Send>,
     writer: Box<dyn std::io::Write + Send>,
     reader: Box<dyn std::io::Read + Send>,
     _pair: portable_pty::PtyPair,
+    created_at: Instant,
 }
 
 #[derive(Clone)]
@@ -94,6 +98,7 @@ impl TerminalManager {
             writer,
             reader,
             _pair: pair,
+            created_at: Instant::now(),
         };
 
         self.sessions
@@ -153,6 +158,16 @@ impl TerminalManager {
             .lock()
             .map(|s| s.contains_key(id))
             .unwrap_or(false)
+    }
+
+    pub fn cleanup_stale(&self) -> usize {
+        let mut sessions = match self.sessions.lock() {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let before = sessions.len();
+        sessions.retain(|_, session| session.created_at.elapsed() < SESSION_TIMEOUT);
+        before - sessions.len()
     }
 }
 

@@ -44,7 +44,10 @@
               @disconnected="onDisconnected"
               @error="onTerminalError"
             />
-            <div v-else-if="!error" class="d-flex align-center justify-center" style="min-height: 300px">
+            <div v-else-if="error" class="d-flex align-center justify-center" style="min-height: 300px">
+              <v-icon icon="mdi-alert-circle-outline" size="48" color="error" />
+            </div>
+            <div v-else class="d-flex align-center justify-center" style="min-height: 300px">
               <v-progress-circular indeterminate />
             </div>
           </v-col>
