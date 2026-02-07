@@ -10,6 +10,8 @@ Default prompt: Write failing tests first using Given/When/Then comments and ali
 ## Workflow
 - Follow phases: spec -> implement -> refactor -> document -> commit.
 - Keep changes deterministic and aligned with policy gates.
+- Each phase ends with its gate passing AND a commit.
+- Do not advance to the next phase until the gate passes (except diagnostic gates).
 
 ## Instructions
 - Write failing tests before implementation changes.
