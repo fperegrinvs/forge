@@ -3,6 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Usage:
+#   ./scripts/dev-desktop-tauri.sh            # watcher + tauri (2 processes)
+#   ./scripts/dev-desktop-tauri.sh --oneshot  # build once + tauri (1 process)
+ONESHOT=0
+for arg in "$@"; do
+  if [[ "$arg" == "--oneshot" ]]; then
+    ONESHOT=1
+  fi
+done
+
+if [[ "${FORGE_DESKTOP_ONESHOT:-}" == "1" ]]; then
+  ONESHOT=1
+fi
+
 # Prefer running the local CLI build via Node so the desktop backend can always
 # resolve `forge` during development without requiring a globally installed binary.
 export FORGE_DESKTOP_NODE_BIN="${FORGE_DESKTOP_NODE_BIN:-node}"
@@ -18,13 +32,27 @@ cd "$ROOT/apps/desktop/src-tauri"
 # Keep `apps/desktop/dist` up to date for the embedded single-port server.
 cd "$ROOT/apps/desktop"
 if command -v bun >/dev/null 2>&1; then
-  bun run dev:singleport &
+  if [[ "$ONESHOT" == "1" ]]; then
+    bun run build
+  else
+    bun run dev:singleport &
+  fi
 else
   # Fallback (Bun not installed): use local Vite.
-  ./node_modules/.bin/vite build --watch &
+  if [[ "$ONESHOT" == "1" ]]; then
+    ./node_modules/.bin/vite build
+  else
+    ./node_modules/.bin/vite build --watch &
+  fi
 fi
-WATCH_PID="$!"
-trap 'kill "$WATCH_PID" 2>/dev/null || true' EXIT
+if [[ "$ONESHOT" != "1" ]]; then
+  WATCH_PID="$!"
+  trap 'kill "$WATCH_PID" 2>/dev/null || true' EXIT
+fi
 
 cd "$ROOT/apps/desktop/src-tauri"
+if [[ "$ONESHOT" == "1" ]]; then
+  # Strip the flag so cargo/tauri doesn't see it.
+  set -- "${@/--oneshot/}"
+fi
 exec cargo tauri dev "$@"

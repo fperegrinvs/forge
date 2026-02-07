@@ -10,6 +10,7 @@ From the repo root:
 bun run --filter @forge/desktop dev
 bun run --filter @forge/desktop dev:singleport
 bun run dev:desktop:tauri
+bun run dev:desktop:tauri:oneshot
 bun run --filter @forge/desktop build
 bun run --filter @forge/desktop test
 bun run --filter @forge/desktop typecheck
@@ -22,6 +23,7 @@ Notes:
 - `dev:singleport` keeps `apps/desktop/dist/` up to date for the embedded app-server (port `1420`).
 - The desktop UI talks to the backend via HTTP `/api/*` (single origin), not Tauri `invoke()`.
 - `bun run dev:desktop:tauri` is the recommended way to start Tauri in dev (it starts the watcher + `cargo tauri dev`).
+- `bun run dev:desktop:tauri:oneshot` runs a one-time frontend build then starts Tauri (no watch, single process after startup).
 
 ## Packs + Guidance Updates
 
