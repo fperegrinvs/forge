@@ -282,7 +282,7 @@ describe("cli", () => {
   });
 
   it("auto-resumes paused run when run next is called", async () => {
-    // Given a workspace with a paused run and no check scripts (auto-pass)
+    // Given a workspace where the only task is already completed but a stale pausedRun exists
     const root = await mkdtemp(join(tmpdir(), "forge-run-"));
     await mkdir(join(root, "checks", "task-types", "documentation"), { recursive: true });
     await mkdir(join(root, ".forge"), { recursive: true });
@@ -328,12 +328,13 @@ describe("cli", () => {
     const planPath = join(root, "plan.json");
     await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 
+    // State has a pausedRun but the task is already completed
+    // Previously runNext would refuse to proceed; now it should auto-resume and see no pending tasks
     const state = {
       planPath,
-      tasks: { "docs-1": "paused" },
+      tasks: { "docs-1": "completed" },
       pausedRun: {
         runId: "run-1",
-        taskId: "docs-1",
         adapterType: "codex",
         externalRunId: "ext-1"
       },
@@ -344,17 +345,16 @@ describe("cli", () => {
     const previous = process.cwd();
     process.chdir(root);
     try {
-      // When run next is called on a paused run
+      // When run next is called on a workspace with a stale paused run
       const { stdout } = await captureStdio(async () => {
         const cli = buildCli();
         await cli.parseAsync(["node", "forge", "run", "next", "--plan", planPath, "--json"]);
       });
 
-      // Then it auto-resumes and executes the task (completed since no failing checks)
-      const parsed = JSON.parse(stdout) as { state: string; taskId: string; message: string };
+      // Then it auto-resumes (clears pausedRun) and reports no runnable tasks
+      const parsed = JSON.parse(stdout) as { state: string; message: string };
       expect(parsed.state).toBe("completed");
-      expect(parsed.taskId).toBe("docs-1");
-      expect(parsed.message).toContain("Task completed");
+      expect(parsed.message).toContain("No runnable tasks remain");
     } finally {
       process.chdir(previous);
     }

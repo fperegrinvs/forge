@@ -99,7 +99,139 @@ Every plan must conform to the Forge plan schema v2 (bundled at `schemas/plan.v2
 | `verification_command` | yes | Single CI-runnable command string |
 | `tests` | yes | Object with `bdd_scenarios`, `property_invariants`, `contract_tests` arrays |
 | `documentation` | yes | Object with `updates` array and `decision_notes` string |
+| `status` | no | BDD phase: "", "spec", "implement", "refactor", "document", "completed" |
 | `steps` | no | Optional sub-step breakdown |
+
+## Authoritative JSON Schema
+
+The schema below is the single source of truth. A sync test in `packages/guidance-pack` verifies this block matches `packages/contracts/src/schema/plan.v1.schema.json`.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.dev/schema/plan.v1.json",
+  "type": "object",
+  "required": ["metadata", "context", "tasks"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["project", "created", "last_updated", "spec_version", "approved"],
+      "properties": {
+        "project": { "type": "string", "minLength": 1 },
+        "created": { "type": "string", "format": "date-time" },
+        "last_updated": { "type": "string", "format": "date-time" },
+        "spec_version": { "const": "v2" },
+        "approved": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "context": {
+      "type": "object",
+      "required": ["goals", "constraints", "tech_decisions", "architecture"],
+      "properties": {
+        "goals": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "constraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "tech_decisions": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "architecture": { "const": "modulith" }
+      },
+      "additionalProperties": false
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "task_type",
+          "name",
+          "description",
+          "files",
+          "dependencies",
+          "acceptance_criteria",
+          "verification_command",
+          "tests",
+          "documentation"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-_]*$" },
+          "task_type": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "files": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "dependencies": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "verification_command": { "type": "string", "minLength": 1 },
+          "tests": {
+            "type": "object",
+            "required": ["bdd_scenarios", "property_invariants", "contract_tests"],
+            "properties": {
+              "bdd_scenarios": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "property_invariants": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "contract_tests": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            },
+            "additionalProperties": false
+          },
+          "documentation": {
+            "type": "object",
+            "required": ["updates", "decision_notes"],
+            "properties": {
+              "updates": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "decision_notes": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "status": {
+            "type": "string",
+            "enum": ["", "spec", "implement", "refactor", "document", "completed"]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "name": { "type": "string", "minLength": 1 },
+                "description": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
+```
 
 ## Well-Formed Task Example
 

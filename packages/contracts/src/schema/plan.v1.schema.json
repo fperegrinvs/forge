@@ -98,6 +98,10 @@
             },
             "additionalProperties": false
           },
+          "status": {
+            "type": "string",
+            "enum": ["", "spec", "implement", "refactor", "document", "completed"]
+          },
           "steps": {
             "type": "array",
             "items": {

@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
-import { loadTaskTypeRegistry } from "@forge/check-runner";
+import { basename, extname, resolve } from "node:path";
 import { loadBundledWorkflowPolicy } from "@forge/guidance-pack";
 import {
   CURRENT_PLAN_SPEC_VERSION,
@@ -290,10 +289,7 @@ export async function runWorkflowCheck(
 
   if (schemaValidation.valid) {
     const plan = await loadPlan(planPath);
-    const checkRoot = join(workspaceRoot, "checks", "task-types");
-    const registry = await loadTaskTypeRegistry(checkRoot);
-
-    const graphValidation = validatePlanGraph(plan, new Set(registry.keys()));
+    const graphValidation = validatePlanGraph(plan);
     const workflowValidation = validatePlanWorkflow(plan);
 
     issues.push(...toIssues(graphValidation.issues));
