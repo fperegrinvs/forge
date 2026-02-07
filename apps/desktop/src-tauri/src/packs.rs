@@ -477,7 +477,7 @@ fn find_zip_symlink_entry(unzip_verbose_listing: &str) -> Option<String> {
       continue;
     }
     // Take the permission string after ":" (e.g. "lrwxr-xr-x").
-    let perms = trimmed.splitn(2, ':').nth(1)?.trim();
+    let perms = trimmed.split_once(':')?.1.trim();
     if perms.starts_with('l') {
       return Some(trimmed.to_string());
     }

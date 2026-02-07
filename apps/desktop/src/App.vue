@@ -5,9 +5,6 @@
         <div class="d-flex align-center mb-4">
           <h1 class="text-h4">Forge Desktop</h1>
           <v-spacer />
-          <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" class="mr-2" @click="showNewPlan = true">
-            New Plan
-          </v-btn>
           <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateProject = true">
             New Project
           </v-btn>
@@ -32,6 +29,7 @@
 
                   <div class="d-flex flex-wrap ga-2">
                     <v-btn color="primary" @click="onValidate">Validate Plan</v-btn>
+                    <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" @click="showNewPlan = true">New Plan</v-btn>
                     <v-btn color="primary" variant="outlined" @click="onRunNext">Run Next</v-btn>
                     <v-btn color="success" variant="outlined" @click="onResume">Resume</v-btn>
                     <v-btn color="secondary" variant="outlined" @click="onOpenEvidence">Open Evidence</v-btn>

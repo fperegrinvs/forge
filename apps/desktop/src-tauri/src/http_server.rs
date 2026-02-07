@@ -708,7 +708,7 @@ async fn handle_terminal_ws(socket: WebSocket, terminal: TerminalManager, id: St
     // Forward PTY stdout → WebSocket
     let pty_to_ws = async {
         while let Some(data) = rx_to_ws.recv().await {
-            if ws_sender.send(Message::Binary(data.into())).await.is_err() {
+            if ws_sender.send(Message::Binary(data)).await.is_err() {
                 break;
             }
         }
@@ -795,6 +795,8 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
 
     let assets_dir = frontend_dist.join("assets");
     let assets = Router::new().nest_service("/assets", ServeDir::new(assets_dir));
+
+    tokio::spawn(state.terminal.clone().run_cleanup_loop());
 
     let app = Router::new()
         .merge(api)

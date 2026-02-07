@@ -47,6 +47,11 @@ struct Session {
     created_at: Instant,
 }
 
+pub type SessionIo = (
+    Box<dyn std::io::Read + Send>,
+    Box<dyn std::io::Write + Send>,
+);
+
 #[derive(Clone)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, Session>>>,
@@ -136,28 +141,12 @@ impl TerminalManager {
         }
     }
 
-    pub fn take_io(
-        &self,
-        id: &str,
-    ) -> Result<
-        (
-            Box<dyn std::io::Read + Send>,
-            Box<dyn std::io::Write + Send>,
-        ),
-        String,
-    > {
+    pub fn take_io(&self, id: &str) -> Result<SessionIo, String> {
         let mut sessions = self.sessions.lock().map_err(|e| format!("lock: {e}"))?;
         match sessions.remove(id) {
             Some(session) => Ok((session.reader, session.writer)),
             None => Err(format!("session not found: {id}")),
         }
-    }
-
-    pub fn session_exists(&self, id: &str) -> bool {
-        self.sessions
-            .lock()
-            .map(|s| s.contains_key(id))
-            .unwrap_or(false)
     }
 
     pub fn cleanup_stale(&self) -> usize {
@@ -168,6 +157,25 @@ impl TerminalManager {
         let before = sessions.len();
         sessions.retain(|_, session| session.created_at.elapsed() < SESSION_TIMEOUT);
         before - sessions.len()
+    }
+
+    pub async fn run_cleanup_loop(self) {
+        let interval = SESSION_TIMEOUT / 2;
+        loop {
+            tokio::time::sleep(interval).await;
+            let removed = self.cleanup_stale();
+            if removed > 0 {
+                eprintln!("terminal: cleaned up {removed} stale session(s)");
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn session_exists(&self, id: &str) -> bool {
+        self.sessions
+            .lock()
+            .map(|s| s.contains_key(id))
+            .unwrap_or(false)
     }
 }
 
