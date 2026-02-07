@@ -19,7 +19,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:desktop": "vitest run apps/desktop/src/**/*.test.ts",
-    "verify": "bun run workflow:check-sync && bun run typecheck && bun run lint && bun run architecture:check && bun run test && bun run workflow:check",
+    "verify": "bun run workflow:check-sync && bun run docs:check && bun run typecheck && bun run lint && bun run architecture:check && bun run test && bun run workflow:check",
     "dev:desktop": "bun run --filter @forge/desktop dev",
     "docs:check": "bun scripts/docs-check.mjs",
     "architecture:check": "bun scripts/architecture-check.mjs"

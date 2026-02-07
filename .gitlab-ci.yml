@@ -18,6 +18,4 @@ verify:
   script:
     - if [ -f bun.lockb ]; then bun install --frozen-lockfile; else bun install; fi
     - ./scripts/bootstrap-toolchain.sh --check
-    - bun run workflow:check-sync
-    - bun run workflow:check
     - bun run verify

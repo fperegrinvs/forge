@@ -26,9 +26,5 @@ jobs:
           fi
       - name: Toolchain preflight
         run: ./scripts/bootstrap-toolchain.sh --check
-      - name: Workflow assets in sync
-        run: bun run workflow:check-sync
-      - name: Workflow checks
-        run: bun run workflow:check
       - name: Verify
         run: bun run verify
