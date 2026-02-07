@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../contracts" },
+    { "path": "../control-plane" },
+    { "path": "../guidance-pack" },
+    { "path": "../shared-utils" },
+    { "path": "../templates" }
+  ],
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

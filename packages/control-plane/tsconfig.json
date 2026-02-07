@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../contracts" },
+    { "path": "../check-runner" },
+    { "path": "../adapter-codex" },
+    { "path": "../adapter-claude" },
+    { "path": "../shared-utils" }
+  ],
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "forge-app-template",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'configure app dev scripts'",
+    "test": "echo 'configure app tests'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'configure lint rules'",
+    "docs:check": "node scripts/docs-check.mjs",
+    "architecture:check": "node scripts/architecture-check.mjs",
+    "gate:green": "npm run test && npm run typecheck && npm run lint",
+    "gate:architecture": "npm run architecture:check",
+    "gate:docs": "npm run docs:check",
+    "workflow:check": "npm run gate:green && npm run gate:architecture && npm run gate:docs"
+  }
+}

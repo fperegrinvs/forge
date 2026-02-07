@@ -1,0 +1,19 @@
+# Forge AGENTS
+
+Workflow policy version: 1.1.0
+
+## Required Workflow
+- Follow phases in order: spec -> implement -> refactor -> document -> commit.
+- Use code-first BDD with Given/When/Then comments in tests.
+- Prefer fakes over mocks. Mocks require annotation (forge-mock) and are only for adapter_boundary or failure_simulation.
+- Keep modulith boundaries and import restrictions intact.
+- Update documentation and decisions together with code changes.
+
+## Canonical Gates
+- gate:spec -> npm run typecheck && npm run test -- --runInBand --passWithNoTests=false
+- gate:green -> npm run test && npm run typecheck && npm run lint
+- gate:refactor -> npm run test && npm run typecheck && npm run lint
+- gate:architecture -> npm run architecture:check
+- gate:docs -> npm run docs:check
+- gate:commit -> git status --porcelain
+- gate:verify -> npm run test && npm run typecheck && npm run lint && npm run architecture:check && npm run test:desktop

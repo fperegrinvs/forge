@@ -1,0 +1,19 @@
+{
+  "name": "forge-guidance-pack",
+  "version": "1.0.0",
+  "workflow_policy_version": "1.1.0",
+  "workflow_policy_hash": "de7e0e8243d551bfc2a4a24133d72c98de3eaba77eefda61588246d0d0bbfbfa",
+  "context": {
+    "max_read_bytes": 262144
+  },
+  "fallback_files": {
+    "plan": "PLAN.md",
+    "execution_log": "EXECUTION_LOG.md",
+    "decisions": "decisions.md"
+  },
+  "agents_precedence": [
+    "global",
+    "repo_root",
+    "nearest_directory_override"
+  ]
+}

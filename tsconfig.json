@@ -1,0 +1,15 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared-utils" },
+    { "path": "packages/contracts" },
+    { "path": "packages/templates" },
+    { "path": "packages/guidance-pack" },
+    { "path": "packages/check-runner" },
+    { "path": "packages/adapter-codex" },
+    { "path": "packages/adapter-claude" },
+    { "path": "packages/control-plane" },
+    { "path": "packages/cli" },
+    { "path": "apps/desktop" }
+  ]
+}
