@@ -5,6 +5,7 @@ const { fetchMock } = vi.hoisted(() => ({
 }));
 
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
+import { getSkillInvocation } from "./planDialogInstructions";
 
 describe("NewPlanDialog spawn/kill lifecycle", () => {
   beforeEach(() => {
@@ -58,5 +59,31 @@ describe("NewPlanDialog spawn/kill lifecycle", () => {
     // When spawn is called
     // Then it throws an error
     await expect(terminalSpawn({ command: "claude", cwd: "/tmp" })).rejects.toThrow("spawn failed");
+  });
+});
+
+describe("NewPlanDialog adapter-specific instructions", () => {
+  it("returns slash command for claude adapter", () => {
+    // Given the claude adapter
+    // When getting the skill invocation
+    const result = getSkillInvocation("claude");
+    // Then it returns a slash command
+    expect(result).toBe("Type `/plan-guided` and press Enter");
+  });
+
+  it("returns mention syntax for codex adapter", () => {
+    // Given the codex adapter
+    // When getting the skill invocation
+    const result = getSkillInvocation("codex");
+    // Then it returns a mention with description prompt
+    expect(result).toBe("Mention `$plan-guided` and describe your feature");
+  });
+
+  it("falls back to slash command for unknown adapters", () => {
+    // Given an unknown adapter
+    // When getting the skill invocation
+    const result = getSkillInvocation("some-other-agent");
+    // Then it falls back to the slash command syntax
+    expect(result).toBe("Type `/plan-guided` and press Enter");
   });
 });

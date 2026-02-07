@@ -10,7 +10,9 @@ import {
   installGuidanceFromPackRoot,
   loadBundledManifest,
   loadBundledWorkflowPolicy,
-  resolveAgentsPrecedence
+  registerSkillCommands,
+  resolveAgentsPrecedence,
+  stripFrontmatter
 } from "./guidance.js";
 import "./index.js";
 
@@ -131,6 +133,106 @@ describe("guidance pack", () => {
     expect(planGuided).toBeDefined();
     expect(planGuided!.hasSkillFile).toBe(true);
     expect(planGuided!.hasReferences).toBe(true);
+  });
+
+  it("stripFrontmatter removes leading YAML frontmatter block", () => {
+    // Given markdown content with YAML frontmatter
+    const content = "---\nname: test\ndescription: a test skill\n---\n\n# Heading\n\nBody text.\n";
+    // When frontmatter is stripped
+    const result = stripFrontmatter(content);
+    // Then only the markdown body remains
+    expect(result).toBe("# Heading\n\nBody text.\n");
+  });
+
+  it("stripFrontmatter returns content unchanged when no frontmatter exists", () => {
+    // Given markdown content without frontmatter
+    const content = "# Just a heading\n\nSome text.\n";
+    // When stripFrontmatter is called
+    const result = stripFrontmatter(content);
+    // Then the content is returned as-is
+    expect(result).toBe(content);
+  });
+
+  it("registerSkillCommands creates .claude/commands/<name>.md with frontmatter stripped", async () => {
+    // Given a skills directory with a skill containing YAML frontmatter
+    const skillsDir = await mkdtemp(join(tmpdir(), "forge-skills-"));
+    const skillDir = join(skillsDir, "my-skill");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: my-skill\ndescription: Test skill\n---\n\n# my-skill\n\nInstructions here.\n",
+      "utf8"
+    );
+
+    const targetRoot = await mkdtemp(join(tmpdir(), "forge-target-"));
+
+    // When skill commands are registered
+    const result = await registerSkillCommands(skillsDir, targetRoot);
+
+    // Then .claude/commands/my-skill.md exists with frontmatter stripped
+    expect(result.claude).toContain("my-skill");
+    const claudeCmd = await readFile(join(targetRoot, ".claude", "commands", "my-skill.md"), "utf8");
+    expect(claudeCmd).not.toContain("---");
+    expect(claudeCmd).toContain("# my-skill");
+    expect(claudeCmd).toContain("Instructions here.");
+  });
+
+  it("registerSkillCommands creates .agents/skills/<name>/SKILL.md preserving content", async () => {
+    // Given a skills directory with a skill
+    const skillsDir = await mkdtemp(join(tmpdir(), "forge-skills-"));
+    const skillDir = join(skillsDir, "my-skill");
+    await mkdir(skillDir, { recursive: true });
+    const originalContent = "---\nname: my-skill\n---\n\n# my-skill\n\nFull content.\n";
+    await writeFile(join(skillDir, "SKILL.md"), originalContent, "utf8");
+
+    const targetRoot = await mkdtemp(join(tmpdir(), "forge-target-"));
+
+    // When skill commands are registered
+    const result = await registerSkillCommands(skillsDir, targetRoot);
+
+    // Then .agents/skills/my-skill/SKILL.md exists with full content preserved
+    expect(result.codex).toContain("my-skill");
+    const codexSkill = await readFile(join(targetRoot, ".agents", "skills", "my-skill", "SKILL.md"), "utf8");
+    expect(codexSkill).toBe(originalContent);
+  });
+
+  it("installGuidance populates both .claude/commands/ and .agents/skills/", async () => {
+    // Given the bundled guidance pack
+    const target = await mkdtemp(join(tmpdir(), "forge-guidance-commands-"));
+
+    // When guidance is installed
+    await installGuidance(target);
+
+    // Then Claude Code commands are created for discovered skills
+    expect(await exists(join(target, ".claude", "commands", "plan-guided.md"))).toBe(true);
+    const claudeCmd = await readFile(join(target, ".claude", "commands", "plan-guided.md"), "utf8");
+    expect(claudeCmd).not.toMatch(/^---/);
+    expect(claudeCmd).toContain("# plan-guided");
+
+    // And Codex skills are created
+    expect(await exists(join(target, ".agents", "skills", "plan-guided", "SKILL.md"))).toBe(true);
+  });
+
+  it("registerSkillCommands skips identical command files on re-register", async () => {
+    // Given a skills directory with a skill
+    const skillsDir = await mkdtemp(join(tmpdir(), "forge-skills-"));
+    const skillDir = join(skillsDir, "my-skill");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: my-skill\n---\n\n# my-skill\n\nContent.\n",
+      "utf8"
+    );
+    const targetRoot = await mkdtemp(join(tmpdir(), "forge-target-"));
+
+    // When skill commands are registered twice
+    const first = await registerSkillCommands(skillsDir, targetRoot);
+    const second = await registerSkillCommands(skillsDir, targetRoot);
+
+    // Then first call registers, second call returns empty (idempotent)
+    expect(first.claude).toContain("my-skill");
+    expect(second.claude).toEqual([]);
+    expect(second.codex).toEqual([]);
   });
 
   it("keeps generated skills aligned with policy skill list", async () => {

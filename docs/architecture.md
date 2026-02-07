@@ -6,7 +6,7 @@ This repository implements Phase 0-2 of Forge componentization.
 
 - `packages/contracts`: Plan schema and validation rules.
 - `packages/templates`: Local project/module scaffolding.
-- `packages/guidance-pack`: Guidance artifact and installation behavior.
+- `packages/guidance-pack`: Guidance artifact and installation behavior. Registers skills as agent-native commands (`.claude/commands/` and `.agents/skills/`) during install.
 - `packages/check-runner`: Task-type check execution and normalization.
 - `packages/adapter-codex` and `packages/adapter-claude`: Runtime adapters with unified event contract.
 - `packages/control-plane`: Plan lifecycle orchestration and evidence persistence.

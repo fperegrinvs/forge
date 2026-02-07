@@ -15,3 +15,8 @@ export type SkillDescriptor = {
   hasReferences: boolean;
   hasAssets: boolean;
 };
+
+export type RegisteredCommands = {
+  claude: string[];
+  codex: string[];
+};
