@@ -9,8 +9,38 @@ type CommandExecutor = (
   env: Record<string, string>
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
+type RunState = {
+  context: RunContext;
+  externalRunId?: string;
+};
+
+const externalRunIdKeys = new Set(["thread_id", "threadId", "session_id", "sessionId"]);
+
+function extractExternalRunId(payload: unknown): string | undefined {
+  const queue: unknown[] = [payload];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") {
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(current)) {
+      if (externalRunIdKeys.has(key) && typeof value === "string" && value.trim().length > 0) {
+        return value;
+      }
+
+      if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+
+  return undefined;
+}
+
 export class CodexAdapter implements AgentAdapter {
-  private readonly runs = new Map<string, RunContext>();
+  private readonly runs = new Map<string, RunState>();
 
   constructor(
     private readonly execute: CommandExecutor = runCommand,
@@ -19,13 +49,13 @@ export class CodexAdapter implements AgentAdapter {
 
   startRun(context: RunContext): Promise<RunHandle> {
     const runId = randomUUID();
-    this.runs.set(runId, context);
+    this.runs.set(runId, { context });
     return Promise.resolve({ runId });
   }
 
   async *streamEvents(runId: string): AsyncIterable<AdapterEvent> {
-    const context = this.runs.get(runId);
-    if (!context) {
+    const run = this.runs.get(runId);
+    if (!run) {
       yield {
         type: "run.failed",
         runId,
@@ -37,8 +67,18 @@ export class CodexAdapter implements AgentAdapter {
 
     yield { type: "run.started", runId, at: new Date().toISOString() };
 
-    const args = ["exec", "--json", context.prompt];
-    const result = await this.execute(this.command, args, context.workingDirectory, context.env ?? {});
+    const args = ["exec", "--json"];
+    if (run.context.approvalMode) {
+      args.push("--approval-mode", run.context.approvalMode);
+    }
+    args.push(run.context.prompt);
+
+    const result = await this.execute(
+      this.command,
+      args,
+      run.context.workingDirectory,
+      run.context.env ?? {}
+    );
 
     const lines = result.stdout
       .split("\n")
@@ -46,6 +86,16 @@ export class CodexAdapter implements AgentAdapter {
       .filter(Boolean);
 
     for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        const externalRunId = extractExternalRunId(parsed);
+        if (externalRunId) {
+          run.externalRunId = externalRunId;
+        }
+      } catch {
+        // Best effort parse: codex may emit non-JSON lines in mixed streams.
+      }
+
       yield {
         type: "run.output",
         runId,
@@ -84,10 +134,16 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   resume(runId: string): Promise<RunHandle> {
-    if (!this.runs.has(runId)) {
+    const run = this.runs.get(runId);
+    if (!run) {
       return Promise.reject(new Error(`run not found: ${runId}`));
     }
-    return Promise.resolve({ runId });
+
+    if (!run.externalRunId) {
+      return Promise.reject(new Error(`external run id not found: ${runId}`));
+    }
+
+    return Promise.resolve({ runId, externalRunId: run.externalRunId });
   }
 
   cancel(runId: string): Promise<void> {

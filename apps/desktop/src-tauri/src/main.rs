@@ -23,6 +23,8 @@ struct ValidationResult {
 struct RunNextResult {
     state: String,
     task_id: Option<String>,
+    external_run_id: Option<String>,
+    resume_command: Option<String>,
     message: String,
 }
 
@@ -78,6 +80,8 @@ fn run_next(plan_path: String, adapter: String) -> RunNextResult {
     RunNextResult {
         state: "completed".into(),
         task_id: Some("task-1".into()),
+        external_run_id: None,
+        resume_command: None,
         message: format!("Run Next called for {} with adapter {}", plan_path, adapter),
     }
 }

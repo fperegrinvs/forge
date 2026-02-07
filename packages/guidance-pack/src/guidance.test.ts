@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -36,5 +36,26 @@ describe("guidance pack", () => {
   it("loads bundled workflow policy", async () => {
     const policy = await loadBundledWorkflowPolicy();
     expect(policy.version).toBeDefined();
+  });
+
+  it("keeps generated skills aligned with policy skill list", async () => {
+    const root = getBundledGuidanceRoot();
+    const policy = await loadBundledWorkflowPolicy();
+    const policySkills =
+      Array.isArray((policy as Record<string, unknown>).skills)
+        ? ((policy as Record<string, unknown>).skills as Array<Record<string, unknown>>)
+            .map((skill) => skill.name)
+            .filter((name): name is string => typeof name === "string")
+        : [];
+
+    const generatedSkills = await readdir(join(root, "skills"), { withFileTypes: true });
+    const generatedSkillNames = generatedSkills.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+
+    expect([...generatedSkillNames].sort()).toEqual([...policySkills].sort());
+
+    for (const name of generatedSkillNames) {
+      const skillFile = await readFile(join(root, "skills", name, "SKILL.md"), "utf8");
+      expect(skillFile.trim().length).toBeGreaterThan(0);
+    }
   });
 });

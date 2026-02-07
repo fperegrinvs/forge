@@ -11,5 +11,10 @@ describe("cli", () => {
     expect(names).toContain("plan");
     expect(names).toContain("run");
     expect(names).toContain("workflow");
+
+    const run = cli.commands.find((command) => command.name() === "run");
+    const runCommands = run?.commands.map((command) => command.name()) ?? [];
+    expect(runCommands).toContain("next");
+    expect(runCommands).toContain("resume");
   });
 });

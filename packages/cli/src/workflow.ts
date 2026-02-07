@@ -316,6 +316,14 @@ export async function runWorkflowCheck(
     });
   }
 
+  if (changed.source.length > 0 && !changed.docs.includes("decisions.md")) {
+    issues.push({
+      path: "/changed/decisions",
+      message: "Source files changed without updating decisions.md.",
+      code: "workflow_decisions_missing"
+    });
+  }
+
   if (changed.tests.length > 0) {
     const hasBddMarkers = await changedTestsContainBddMarkers(workspaceRoot, changed.tests);
     if (!hasBddMarkers) {

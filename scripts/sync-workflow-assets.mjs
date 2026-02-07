@@ -40,6 +40,21 @@ function renderAgents(policy) {
   const phases = policy.workflow.phases.join(" -> ");
   const gateCommands = policy.commands.gates;
   const mockTag = policy.quality.mock_annotation_tag;
+  const gateLines = [
+    `- gate:spec -> ${gateCommands.spec}`,
+    `- gate:green -> ${gateCommands.green}`,
+    `- gate:refactor -> ${gateCommands.refactor}`
+  ];
+
+  if (gateCommands.architecture) {
+    gateLines.push(`- gate:architecture -> ${gateCommands.architecture}`);
+  }
+
+  gateLines.push(
+    `- gate:docs -> ${gateCommands.docs}`,
+    `- gate:commit -> ${gateCommands.commit}`,
+    `- gate:verify -> ${gateCommands.verify}`
+  );
 
   return [
     "# Forge AGENTS",
@@ -54,12 +69,7 @@ function renderAgents(policy) {
     "- Update documentation and decisions together with code changes.",
     "",
     "## Canonical Gates",
-    `- gate:spec -> ${gateCommands.spec}`,
-    `- gate:green -> ${gateCommands.green}`,
-    `- gate:refactor -> ${gateCommands.refactor}`,
-    `- gate:docs -> ${gateCommands.docs}`,
-    `- gate:commit -> ${gateCommands.commit}`,
-    `- gate:verify -> ${gateCommands.verify}`,
+    ...gateLines,
     ""
   ].join("\n");
 }
@@ -80,6 +90,17 @@ function renderTestingRule(policy) {
   const mockTag = policy.quality.mock_annotation_tag;
   const mockReasons = policy.quality.allow_mocks_only_for.map((reason) => `- ${reason}`).join("\n");
   const boundaryGlobs = policy.quality.mock_boundary_test_globs.map((glob) => `- ${glob}`).join("\n");
+  const gateCommands = policy.commands.gates;
+  const gateLines = [
+    `Run gate:spec with: ${gateCommands.spec}`,
+    `Run gate:green with: ${gateCommands.green}`
+  ];
+
+  if (gateCommands.architecture) {
+    gateLines.push(`Run gate:architecture with: ${gateCommands.architecture}`);
+  }
+
+  gateLines.push(`Run gate:refactor with: ${gateCommands.refactor}`);
 
   return [
     "# Testing Rules",
@@ -97,9 +118,7 @@ function renderTestingRule(policy) {
     mockReasons,
     "Adapter-boundary reason is allowed only in:",
     boundaryGlobs,
-    `Run gate:spec with: ${policy.commands.gates.spec}`,
-    `Run gate:green with: ${policy.commands.gates.green}`,
-    `Run gate:refactor with: ${policy.commands.gates.refactor}`,
+    ...gateLines,
     ""
   ].join("\n");
 }

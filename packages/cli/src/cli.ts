@@ -18,6 +18,7 @@ import {
 } from "./workflow.js";
 
 type JsonFlag = { json?: boolean };
+type AdapterName = "codex" | "claude";
 
 enum ExitCode {
   ValidationFailed = 2,
@@ -37,6 +38,26 @@ function fail(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}\n`);
   process.exit(ExitCode.RuntimeFailed);
+}
+
+function formatRunResult(result: {
+  state: string;
+  message: string;
+  externalRunId?: string;
+  resumeCommand?: string;
+}): string {
+  if (result.state !== "paused") {
+    return result.message;
+  }
+
+  const lines = [result.message];
+  if (result.externalRunId) {
+    lines.push(`externalRunId: ${result.externalRunId}`);
+  }
+  if (result.resumeCommand) {
+    lines.push(`manualResume: ${result.resumeCommand}`);
+  }
+  return lines.join("\n");
 }
 
 async function installGuidanceFromPath(sourceRoot: string, targetRoot: string): Promise<string[]> {
@@ -197,17 +218,49 @@ export function buildCli(): Command {
     .requiredOption("--plan <path>", "plan path")
     .option("--adapter <name>", "codex|claude", "codex")
     .option("--json", "machine output")
-    .action(async (options: JsonFlag & { plan: string; adapter: "codex" | "claude" }) => {
+    .action(async (options: JsonFlag & { plan: string; adapter: AdapterName }) => {
       try {
         const controlPlane = new ForgeControlPlane(process.cwd());
         const result = await controlPlane.runNext(resolve(options.plan), options.adapter);
 
         if (result.state === "failed") {
-          output(options.json ? result : result.message, options.json);
+          output(options.json ? result : formatRunResult(result), options.json);
           process.exit(ExitCode.RuntimeFailed);
         }
 
-        output(options.json ? result : result.message, options.json);
+        output(options.json ? result : formatRunResult(result), options.json);
+      } catch (error) {
+        fail(error);
+      }
+    });
+
+  run
+    .command("resume")
+    .requiredOption("--plan <path>", "plan path")
+    .requiredOption("--run-id <id>", "paused run id")
+    .option("--adapter <name>", "codex|claude", "codex")
+    .option("--json", "machine output")
+    .action(async (options: JsonFlag & { plan: string; runId: string; adapter: AdapterName }) => {
+      try {
+        const controlPlane = new ForgeControlPlane(process.cwd());
+        const resumed = await controlPlane.resume(options.runId);
+        if (!resumed) {
+          output(
+            options.json
+              ? { success: false, message: `Run ${options.runId} is not paused or does not exist.` }
+              : `Run ${options.runId} is not paused or does not exist.`,
+            options.json
+          );
+          process.exit(ExitCode.RuntimeFailed);
+        }
+
+        const result = await controlPlane.runNext(resolve(options.plan), options.adapter);
+        if (result.state === "failed") {
+          output(options.json ? result : formatRunResult(result), options.json);
+          process.exit(ExitCode.RuntimeFailed);
+        }
+
+        output(options.json ? result : formatRunResult(result), options.json);
       } catch (error) {
         fail(error);
       }

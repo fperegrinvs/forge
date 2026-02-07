@@ -17,9 +17,10 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:desktop": "vitest run apps/desktop/src/**/*.test.ts",
-    "verify": "npm run workflow:check-sync && npm run typecheck && npm run lint && npm run test && npm run workflow:check",
+    "verify": "npm run workflow:check-sync && npm run typecheck && npm run lint && npm run architecture:check && npm run test && npm run workflow:check",
     "dev:desktop": "npm --workspace @forge/desktop run dev",
-    "docs:check": "node scripts/docs-check.mjs"
+    "docs:check": "node scripts/docs-check.mjs",
+    "architecture:check": "node scripts/architecture-check.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

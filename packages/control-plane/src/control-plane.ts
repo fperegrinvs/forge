@@ -39,6 +39,14 @@ function classifyFailure(checks: CheckResult[], events: AdapterEvent[]): RunNext
   return undefined;
 }
 
+function buildResumeCommand(adapterType: AdapterType, externalRunId?: string): string | undefined {
+  if (adapterType === "codex" && externalRunId) {
+    return `codex resume ${externalRunId}`;
+  }
+
+  return undefined;
+}
+
 async function writeEvents(evidenceDir: string, events: AdapterEvent[]): Promise<void> {
   const path = join(evidenceDir, "adapter-events.jsonl");
   const lines = events.map((event) => JSON.stringify(event)).join("\n");
@@ -88,14 +96,36 @@ export class ForgeControlPlane {
 
     const plan = await loadPlan(planPath);
     const state = await this.loadState(planPath, plan.tasks.map((task) => task.id));
+    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
+
+    if (pausedRun) {
+      const resumeCommand = buildResumeCommand(pausedRun.adapterType ?? adapterType, pausedRun.externalRunId);
+      return {
+        state: "paused",
+        runId: pausedRun.runId,
+        ...(pausedRun.taskId ? { taskId: pausedRun.taskId } : {}),
+        ...(pausedRun.externalRunId ? { externalRunId: pausedRun.externalRunId } : {}),
+        ...(resumeCommand ? { resumeCommand } : {}),
+        message: "Execution is paused; resume the run before continuing."
+      };
+    }
 
     const nextTask = plan.tasks.find(
       (task) =>
-        state.tasks[task.id] !== "completed" &&
+        state.tasks[task.id] === "pending" &&
         task.dependencies.every((dependency) => state.tasks[dependency] === "completed")
     );
 
     if (!nextTask) {
+      const pausedTaskId = Object.entries(state.tasks).find(([, taskState]) => taskState === "paused")?.[0];
+      if (pausedTaskId) {
+        return {
+          taskId: pausedTaskId,
+          state: "paused",
+          message: "Execution is paused; resume the run before continuing."
+        };
+      }
+
       return {
         state: "completed",
         message: "No runnable tasks remain"
@@ -110,14 +140,26 @@ export class ForgeControlPlane {
       taskId: nextTask.id,
       prompt: `${nextTask.name}\n\n${nextTask.description}`,
       workingDirectory: this.workspaceRoot,
-      allowedTools: []
+      allowedTools: [],
+      approvalMode: "suggest"
     };
 
-    const { runId } = await adapter.startRun(runContext);
+    const startedRun = await adapter.startRun(runContext);
+    const runId = startedRun.runId;
+    let externalRunId = startedRun.externalRunId;
     const events: AdapterEvent[] = [];
 
     for await (const event of adapter.streamEvents(runId)) {
       events.push(event);
+    }
+
+    if (!externalRunId) {
+      try {
+        const resumedRun = await adapter.resume(runId);
+        externalRunId = resumedRun.externalRunId;
+      } catch {
+        externalRunId = undefined;
+      }
     }
 
     const registry = await loadTaskTypeRegistry(checkRoot);
@@ -129,6 +171,7 @@ export class ForgeControlPlane {
     await writeJsonFile(join(evidenceDir, "run-metadata.json"), {
       taskId: nextTask.id,
       runId,
+      externalRunId,
       adapterType,
       at: new Date().toISOString()
     });
@@ -139,7 +182,14 @@ export class ForgeControlPlane {
     const classification = classifyFailure(checks, events);
 
     if (classification) {
+      const resumeCommand = buildResumeCommand(adapterType, externalRunId);
       state.tasks[nextTask.id] = "paused";
+      state.pausedRun = {
+        runId,
+        taskId: nextTask.id,
+        adapterType,
+        ...(externalRunId ? { externalRunId } : {})
+      };
       state.pausedRunId = runId;
       await this.saveState(state);
       return {
@@ -147,6 +197,8 @@ export class ForgeControlPlane {
         state: "paused",
         classification,
         runId,
+        ...(externalRunId ? { externalRunId } : {}),
+        ...(resumeCommand ? { resumeCommand } : {}),
         checks,
         events,
         message: `Task paused due to ${classification} failure`
@@ -154,6 +206,7 @@ export class ForgeControlPlane {
     }
 
     state.tasks[nextTask.id] = "completed";
+    delete state.pausedRun;
     delete state.pausedRunId;
     await this.saveState(state);
 
@@ -161,6 +214,7 @@ export class ForgeControlPlane {
       taskId: nextTask.id,
       state: "completed",
       runId,
+      ...(externalRunId ? { externalRunId } : {}),
       checks,
       events,
       message: "Task completed"
@@ -169,15 +223,28 @@ export class ForgeControlPlane {
 
   async pause(runId: string): Promise<void> {
     const state = await this.loadState("", []);
+    state.pausedRun = { runId };
     state.pausedRunId = runId;
     await this.saveState(state);
   }
 
   async resume(runId: string): Promise<boolean> {
     const state = await this.loadState("", []);
-    if (state.pausedRunId !== runId) {
+    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
+    if (!pausedRun || pausedRun.runId !== runId) {
       return false;
     }
+
+    if (pausedRun.taskId && state.tasks[pausedRun.taskId] === "paused") {
+      state.tasks[pausedRun.taskId] = "pending";
+    } else {
+      const pausedTaskId = Object.entries(state.tasks).find(([, taskState]) => taskState === "paused")?.[0];
+      if (pausedTaskId) {
+        state.tasks[pausedTaskId] = "pending";
+      }
+    }
+
+    delete state.pausedRun;
     delete state.pausedRunId;
     await this.saveState(state);
     return true;
@@ -213,7 +280,17 @@ export class ForgeControlPlane {
     }
 
     const raw = await readFile(this.statePath, "utf8");
-    const existing = JSON.parse(raw) as RuntimeState;
+    const parsed = JSON.parse(raw) as Partial<RuntimeState>;
+    const existing: RuntimeState = {
+      planPath: typeof parsed.planPath === "string" ? parsed.planPath : planPath,
+      tasks: parsed.tasks ?? {},
+      ...(parsed.pausedRun ? { pausedRun: parsed.pausedRun } : {}),
+      ...(parsed.pausedRunId ? { pausedRunId: parsed.pausedRunId } : {})
+    };
+
+    if (!existing.pausedRun && existing.pausedRunId) {
+      existing.pausedRun = { runId: existing.pausedRunId };
+    }
 
     for (const id of taskIds) {
       if (!existing.tasks[id]) {

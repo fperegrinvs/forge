@@ -1,6 +1,6 @@
 # Forge AGENTS
 
-Workflow policy version: 1.0.0
+Workflow policy version: 1.1.0
 
 ## Required Workflow
 - Follow phases in order: spec -> implement -> refactor -> document -> commit.
@@ -13,6 +13,7 @@ Workflow policy version: 1.0.0
 - gate:spec -> npm run typecheck && npm run test -- --runInBand --passWithNoTests=false
 - gate:green -> npm run test && npm run typecheck && npm run lint
 - gate:refactor -> npm run test && npm run typecheck && npm run lint
+- gate:architecture -> npm run architecture:check
 - gate:docs -> npm run docs:check
 - gate:commit -> git status --porcelain
-- gate:verify -> npm run test && npm run typecheck && npm run lint && npm run test:desktop
+- gate:verify -> npm run test && npm run typecheck && npm run lint && npm run architecture:check && npm run test:desktop

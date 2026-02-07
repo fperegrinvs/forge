@@ -5,6 +5,7 @@ export type RunContext = {
   prompt: string;
   workingDirectory: string;
   allowedTools: string[];
+  approvalMode?: "suggest" | "auto-edit" | "full-auto";
   env?: Record<string, string>;
 };
 
@@ -17,6 +18,7 @@ export type AdapterEvent =
 
 export type RunHandle = {
   runId: RunId;
+  externalRunId?: string;
 };
 
 export interface AgentAdapter {

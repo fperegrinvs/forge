@@ -62,6 +62,7 @@ async function initRepo(): Promise<{ repo: string; planPath: string }> {
     "utf8"
   );
   await writeFile(join(repo, "docs", "architecture.md"), "initial\n", "utf8");
+  await writeFile(join(repo, "decisions.md"), "# Decisions\n\n## 2026-02-07\n- Initial setup.\n", "utf8");
 
   const planPath = join(repo, "plan.json");
   await writeFile(planPath, `${JSON.stringify(validPlan, null, 2)}\n`, "utf8");
@@ -130,6 +131,39 @@ describe("workflow", () => {
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.code === "workflow_tests_missing")).toBe(true);
     expect(result.issues.some((issue) => issue.code === "workflow_docs_missing")).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "workflow_decisions_missing")).toBe(true);
+  });
+
+  it("fails when source changes include docs but omit decisions.md", async () => {
+    const { repo, planPath } = await initRepo();
+
+    await writeFile(join(repo, "src", "a.ts"), "export const a = 2;\n", "utf8");
+    await writeFile(
+      join(repo, "tests", "a.test.ts"),
+      "describe('a', () => {\n  // Given baseline\n  // When value changes\n  // Then it matches\n});\n",
+      "utf8"
+    );
+    await writeFile(join(repo, "docs", "architecture.md"), "updated\n", "utf8");
+
+    const result = await runWorkflowCheck(repo, planPath, "HEAD");
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "workflow_decisions_missing")).toBe(true);
+  });
+
+  it("passes when source changes include tests docs and decisions.md", async () => {
+    const { repo, planPath } = await initRepo();
+
+    await writeFile(join(repo, "src", "a.ts"), "export const a = 2;\n", "utf8");
+    await writeFile(
+      join(repo, "tests", "a.test.ts"),
+      "describe('a', () => {\n  // Given baseline\n  // When value changes\n  // Then it matches\n});\n",
+      "utf8"
+    );
+    await writeFile(join(repo, "docs", "architecture.md"), "updated\n", "utf8");
+    await writeFile(join(repo, "decisions.md"), "# Decisions\n\n## 2026-02-08\n- Updated behavior.\n", "utf8");
+
+    const result = await runWorkflowCheck(repo, planPath, "HEAD");
+    expect(result.valid).toBe(true);
   });
 
   it("fails when changed tests do not contain bdd markers", async () => {

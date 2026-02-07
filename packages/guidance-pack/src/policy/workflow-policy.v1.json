@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "workflow": {
     "phases": [
       "spec",
@@ -31,9 +31,10 @@
       "spec": "npm run typecheck && npm run test -- --runInBand --passWithNoTests=false",
       "green": "npm run test && npm run typecheck && npm run lint",
       "refactor": "npm run test && npm run typecheck && npm run lint",
+      "architecture": "npm run architecture:check",
       "docs": "npm run docs:check",
       "commit": "git status --porcelain",
-      "verify": "npm run test && npm run typecheck && npm run lint && npm run test:desktop"
+      "verify": "npm run test && npm run typecheck && npm run lint && npm run architecture:check && npm run test:desktop"
     }
   },
   "docs": {
@@ -46,10 +47,12 @@
     "task_type_gates": {
       "implementation": [
         "green",
+        "architecture",
         "docs"
       ],
       "testing": [
-        "green"
+        "green",
+        "architecture"
       ],
       "documentation": [
         "docs"

@@ -8,6 +8,8 @@ export type ValidateResult = {
 export type RunNextResult = {
   state: string;
   taskId?: string;
+  externalRunId?: string;
+  resumeCommand?: string;
   message: string;
 };
 

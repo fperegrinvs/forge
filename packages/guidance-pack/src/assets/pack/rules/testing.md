@@ -18,4 +18,5 @@ Adapter-boundary reason is allowed only in:
 - packages/**/src/**/*adapter*.test.ts
 Run gate:spec with: npm run typecheck && npm run test -- --runInBand --passWithNoTests=false
 Run gate:green with: npm run test && npm run typecheck && npm run lint
+Run gate:architecture with: npm run architecture:check
 Run gate:refactor with: npm run test && npm run typecheck && npm run lint

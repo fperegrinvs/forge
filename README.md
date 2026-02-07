@@ -35,6 +35,7 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 - `forge plan validate --file <path>`
 - `forge plan migrate --file <path> --write`
 - `forge run next --plan <path>`
+- `forge run resume --plan <path> --run-id <id>`
 - `forge workflow check --plan <path>`
 
 ## Workflow Enforcement
@@ -43,9 +44,16 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 - Sync generated assets and repo-level guidance links: `npm run workflow:sync`
 - Verify generated assets are up to date: `npm run workflow:check-sync`
 - Run hard-fail workflow checks for this repo: `npm run workflow:check`
+- Run architecture constraints check: `npm run architecture:check`
 - Repo-local guidance is exposed via symlinks: `AGENTS.md`, `skills/`, `rules/`, `codex/`.
 - Claude compatibility symlinks are maintained: `CLAUDE.md` and `.claude/{CLAUDE.md,skills,rules}`.
 - Testing policy is fake-first. Mocks are restricted to `adapter_boundary` or `failure_simulation`.
 - Every mock call site must include an adjacent annotation:
   - `// forge-mock: adapter_boundary`
   - `// forge-mock: failure_simulation`
+
+## CI
+
+- GitHub Actions pipeline: `/Users/simon/projects/forge/.github/workflows/ci.yml`
+- GitLab CI pipeline: `/Users/simon/projects/forge/.gitlab-ci.yml`
+- Both pipelines run the same critical gates: toolchain preflight, workflow sync check, workflow check, and full verify.
