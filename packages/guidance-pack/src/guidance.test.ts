@@ -85,6 +85,32 @@ describe("guidance pack", () => {
     expect(await exists(join(target, "rules", "example.md"))).toBe(true);
   });
 
+  it("preserves non-UTF8 file contents when force replacing", async () => {
+    // Given a minimal guidance pack on disk with a binary file
+    const packRoot = await mkdtemp(join(tmpdir(), "forge-guidance-packroot-binary-"));
+    await writeFile(
+      join(packRoot, "manifest.json"),
+      JSON.stringify({ name: "forge-guidance-pack", version: "9.9.9" }, null, 2),
+      "utf8"
+    );
+    await mkdir(join(packRoot, "assets"), { recursive: true });
+    const bytes = Buffer.from([0xff, 0x00, 0x61, 0x62, 0x63]);
+    await writeFile(join(packRoot, "assets", "blob.bin"), bytes);
+
+    // And a target directory with an existing (different) file at the same path
+    const target = await mkdtemp(join(tmpdir(), "forge-guidance-target-binary-"));
+    await mkdir(join(target, "assets"), { recursive: true });
+    await writeFile(join(target, "assets", "blob.bin"), Buffer.from([0x00, 0x00, 0x00]));
+
+    // When guidance is installed with force replace
+    const result = await installGuidanceFromPackRoot(packRoot, target, { forceReplace: true });
+
+    // Then the file is updated byte-for-byte
+    expect(result.updated).toContain("assets/blob.bin");
+    const written = await readFile(join(target, "assets", "blob.bin"));
+    expect(Buffer.from(written)).toEqual(bytes);
+  });
+
   it("loads bundled manifest", async () => {
     const manifest = await loadBundledManifest();
     expect(manifest).toBeTruthy();

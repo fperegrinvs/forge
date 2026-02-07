@@ -99,6 +99,10 @@ pub fn read_installed_packs(app_data_dir: &Path) -> Result<Vec<InstalledPack>, S
       continue;
     }
     let pack_name = pack_entry.file_name().to_string_lossy().to_string();
+    // Hide internal directories (e.g. staging folders) from the UI.
+    if pack_name.starts_with('.') {
+      continue;
+    }
     let versions = fs::read_dir(pack_entry.path()).map_err(|error| format!("read pack versions: {error}"))?;
     for version_entry in versions {
       let version_entry = version_entry.map_err(|error| format!("read version entry: {error}"))?;
@@ -392,7 +396,41 @@ fn validate_zip_archive(archive_path: &Path) -> Result<(), String> {
     }
     validate_archive_entry_path(trimmed)?;
   }
+
+  // Reject symlink entries before extraction to prevent "symlink slip" writes outside the target dir.
+  // We parse `unzip -Z -v` output on Unix-like systems (macOS ships `unzip`).
+  let meta = Command::new("unzip")
+    .args(["-Z", "-v", archive_path.to_string_lossy().as_ref()])
+    .output()
+    .map_err(|error| format!("unzip verbose list failed: {error}"))?;
+  if !meta.status.success() {
+    return Err(format!(
+      "unzip verbose list failed (status={:?}): {}",
+      meta.status.code(),
+      String::from_utf8_lossy(&meta.stderr).trim()
+    ));
+  }
+  if let Some(offending) = find_zip_symlink_entry(&String::from_utf8_lossy(&meta.stdout)) {
+    return Err(format!("zip contains symlink entry (rejected): {offending}"));
+  }
   Ok(())
+}
+
+fn find_zip_symlink_entry(unzip_verbose_listing: &str) -> Option<String> {
+  // Example line (macOS unzip):
+  // "Unix file attributes (120755 octal):            lrwxr-xr-x"
+  for line in unzip_verbose_listing.lines() {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("Unix file attributes") {
+      continue;
+    }
+    // Take the permission string after ":" (e.g. "lrwxr-xr-x").
+    let perms = trimmed.splitn(2, ':').nth(1)?.trim();
+    if perms.starts_with('l') {
+      return Some(trimmed.to_string());
+    }
+  }
+  None
 }
 
 fn validate_archive_entry_path(entry_name: &str) -> Result<(), String> {
@@ -565,5 +603,27 @@ mod tests {
     assert!(validate_archive_entry_path("../escape.txt").is_err());
     assert!(validate_archive_entry_path("a/../../escape.txt").is_err());
     assert!(validate_archive_entry_path("/etc/passwd").is_err());
+  }
+
+  #[test]
+  fn find_zip_symlink_entry_detects_symlinks() {
+    // Given unzip verbose output that includes a symlink entry
+    let listing = r#"
+Central directory entry #1:
+---------------------------
+  file.txt
+  Unix file attributes (100644 octal):            -rw-r--r--
+
+Central directory entry #2:
+---------------------------
+  link
+  Unix file attributes (120755 octal):            lrwxr-xr-x
+"#;
+
+    // When scanning for symlinks
+    let offending = find_zip_symlink_entry(listing);
+
+    // Then it is detected
+    assert!(offending.is_some());
   }
 }

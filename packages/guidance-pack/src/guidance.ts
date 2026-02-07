@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,7 @@ const sourcePackRoot = join(currentDir, "..", "src", "assets", "pack");
 const bundledPackRoot = existsSync(builtPackRoot) ? builtPackRoot : sourcePackRoot;
 const policyFile = "workflow-policy.v1.json";
 
-function hashContent(value: string): string {
+function hashBytes(value: Uint8Array): string {
   return createHash("sha1").update(value).digest("hex");
 }
 
@@ -66,7 +66,9 @@ export async function installGuidanceFromPackRoot(
 
     await mkdir(destinationDir, { recursive: true });
 
-    const sourceContent = await readFile(source, "utf8");
+    // Guidance packs are primarily text, but treat files as bytes so we don't corrupt
+    // non-UTF8 content (images, binaries) if they appear later.
+    const sourceContent = await readFile(source);
 
     if (!(await exists(destination))) {
       await cp(source, destination);
@@ -74,14 +76,14 @@ export async function installGuidanceFromPackRoot(
       continue;
     }
 
-    const existingContent = await readFile(destination, "utf8");
-    if (hashContent(existingContent) === hashContent(sourceContent)) {
+    const existingContent = await readFile(destination);
+    if (hashBytes(existingContent) === hashBytes(sourceContent)) {
       result.skipped.push(rel);
       continue;
     }
 
     if (options.forceReplace) {
-      await writeFile(destination, sourceContent, "utf8");
+      await cp(source, destination, { force: true });
       result.updated.push(rel);
     } else {
       result.skipped.push(rel);
