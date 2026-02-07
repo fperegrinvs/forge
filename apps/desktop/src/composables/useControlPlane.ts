@@ -30,6 +30,8 @@ export type RunNextResult = {
   runId?: string;
   externalRunId?: string;
   resumeCommand?: string;
+  classification?: string;
+  checksSummary?: string[];
   message: string;
 };
 

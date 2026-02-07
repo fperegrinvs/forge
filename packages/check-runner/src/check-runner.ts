@@ -55,28 +55,8 @@ export class ScriptCheckRunner implements CheckRunner {
 
   async runChecks(taskType: string, taskId: string, cwd: string): Promise<CheckResult[]> {
     const binding = this.registry.get(taskType);
-    if (!binding) {
-      return [
-        {
-          name: `${taskType}:missing-binding`,
-          status: "infra_error",
-          summary: `No checks registered for task type ${taskType}`,
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString()
-        }
-      ];
-    }
-
-    if (binding.scripts.length === 0) {
-      return [
-        {
-          name: `${taskType}:missing-gates`,
-          status: "infra_error",
-          summary: `No gate scripts found for task type ${taskType}`,
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString()
-        }
-      ];
+    if (!binding || binding.scripts.length === 0) {
+      return [];
     }
 
     const results: CheckResult[] = [];

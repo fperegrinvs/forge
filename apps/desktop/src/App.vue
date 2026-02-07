@@ -440,6 +440,14 @@ async function onRunNext(): Promise<void> {
     current.taskId = result.taskId;
     current.message = result.message;
     logs.value.unshift(`Run -> ${result.message}`);
+    if (result.classification) {
+      logs.value.unshift(`  classification: ${result.classification}`);
+    }
+    if (result.checksSummary?.length) {
+      for (const check of result.checksSummary) {
+        logs.value.unshift(`  ${check}`);
+      }
+    }
   } catch (error) {
     logs.value.unshift(`Run -> error: ${String(error)}`);
   }

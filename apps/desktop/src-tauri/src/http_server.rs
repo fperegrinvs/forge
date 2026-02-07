@@ -161,7 +161,7 @@ struct RunNextRequest {
     adapter: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct RunNextResult {
     state: String,
@@ -169,6 +169,10 @@ struct RunNextResult {
     run_id: Option<String>,
     external_run_id: Option<String>,
     resume_command: Option<String>,
+    #[serde(default)]
+    classification: Option<String>,
+    #[serde(default)]
+    checks_summary: Vec<String>,
     message: String,
 }
 
@@ -190,6 +194,22 @@ async fn run_next(
         ];
 
         let value = run_forge_json(&app, &cwd, &args)?;
+        let checks_summary = value
+            .get("checks")
+            .and_then(|v| v.as_array())
+            .map(|checks| {
+                checks
+                    .iter()
+                    .filter_map(|c| {
+                        let name = c.get("name")?.as_str()?;
+                        let status = c.get("status")?.as_str()?;
+                        let summary = c.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                        Some(format!("[{status}] {name}: {summary}"))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
         Ok::<_, String>(RunNextResult {
             state: value
                 .get("state")
@@ -206,6 +226,11 @@ async fn run_next(
                 .get("resumeCommand")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
+            classification: value
+                .get("classification")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            checks_summary,
             message: value
                 .get("message")
                 .and_then(|v| v.as_str())
