@@ -2,18 +2,31 @@ use axum::{
     extract::{ws::{Message, WebSocket}, Path as AxumPath, Query, State, WebSocketUpgrade},
     http::StatusCode,
     response::IntoResponse,
+    response::sse::{Event, Sse},
     routing::{delete, get, post},
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, path::PathBuf};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::AppHandle;
 use tauri::Manager;
 use tower_http::services::ServeDir;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio_stream::wrappers::ReceiverStream;
+use uuid::Uuid;
 
-use crate::forge_cli::run_forge_json;
-use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs, read_bundled_packs, read_installed_packs};
+use crate::forge_cli::{run_forge_json, spawn_forge_stream};
+use crate::packs::{
+    compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs,
+    read_bundled_packs, read_installed_packs, read_pack_content, PackContent,
+};
 use crate::terminal::TerminalManager;
 
 #[derive(Clone)]
@@ -22,6 +35,35 @@ struct ServerState {
     frontend_dist: PathBuf,
     bundled_packs_dir: Option<PathBuf>,
     terminal: TerminalManager,
+    run_streams: RunStreamHub,
+}
+
+#[derive(Clone, Default)]
+struct RunStreamHub {
+    inner: Arc<Mutex<HashMap<String, RunStreamControls>>>,
+}
+
+#[derive(Clone)]
+struct RunStreamControls {
+    input_tx: tokio::sync::mpsc::Sender<String>,
+    cancel_tx: tokio::sync::watch::Sender<bool>,
+}
+
+impl RunStreamHub {
+    fn insert(&self, id: String, controls: RunStreamControls) {
+        let mut guard = self.inner.lock().expect("run streams lock poisoned");
+        guard.insert(id, controls);
+    }
+
+    fn get(&self, id: &str) -> Option<RunStreamControls> {
+        let guard = self.inner.lock().expect("run streams lock poisoned");
+        guard.get(id).cloned()
+    }
+
+    fn remove(&self, id: &str) {
+        let mut guard = self.inner.lock().expect("run streams lock poisoned");
+        guard.remove(id);
+    }
 }
 
 fn resolve_bundled_packs_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -173,6 +215,8 @@ struct RunNextResult {
     classification: Option<String>,
     #[serde(default)]
     checks_summary: Vec<String>,
+    #[serde(default)]
+    llm_output: Vec<String>,
     message: String,
 }
 
@@ -210,6 +254,59 @@ async fn run_next(
             })
             .unwrap_or_default();
 
+        // Surface a tail of adapter output for troubleshooting (full log is in evidence/adapter-events.jsonl).
+        let mut llm_output = value
+            .get("events")
+            .and_then(|v| v.as_array())
+            .map(|events| {
+                events
+                    .iter()
+                    .filter_map(|e| {
+                        let ty = e.get("type")?.as_str()?;
+                        match ty {
+                            "run.output" => {
+                                let stream = e
+                                    .get("stream")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("stdout");
+                                let chunk = e.get("chunk").and_then(|v| v.as_str()).unwrap_or("");
+                                let trimmed = chunk.trim();
+                                if trimmed.is_empty() {
+                                    return None;
+                                }
+                                let mut text = trimmed.to_string();
+                                if text.len() > 1200 {
+                                    text.truncate(1200);
+                                    text.push_str("…");
+                                }
+                                Some(format!("[{stream}] {text}"))
+                            }
+                            "run.failed" => {
+                                let reason = e.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                                if reason.trim().is_empty() {
+                                    return None;
+                                }
+                                Some(format!("[failed] {}", reason.trim()))
+                            }
+                            "run.tool" => {
+                                let tool = e.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                                let status = e.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                                if status.is_empty() {
+                                    return Some(format!("[tool] {tool}"));
+                                }
+                                Some(format!("[tool] {tool} {status}"))
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+        if llm_output.len() > 200 {
+            llm_output = llm_output.split_off(llm_output.len() - 200);
+            llm_output.insert(0, "(truncated adapter output; see Evidence for full log)".to_string());
+        }
+
         Ok::<_, String>(RunNextResult {
             state: value
                 .get("state")
@@ -231,6 +328,7 @@ async fn run_next(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
             checks_summary,
+            llm_output,
             message: value
                 .get("message")
                 .and_then(|v| v.as_str())
@@ -242,6 +340,261 @@ async fn run_next(
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
     .map(Json)
     .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunNextStreamQuery {
+    project_root: String,
+    plan_path: String,
+    adapter: String,
+}
+
+async fn run_next_stream(
+    State(state): State<ServerState>,
+    Query(query): Query<RunNextStreamQuery>,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
+{
+    let stream_id = Uuid::new_v4().to_string();
+    let (out_tx, out_rx) = tokio::sync::mpsc::channel::<String>(256);
+    let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel::<bool>(false);
+
+    state.run_streams.insert(
+        stream_id.clone(),
+        RunStreamControls {
+            input_tx,
+            cancel_tx,
+        },
+    );
+
+    let app = state.app.clone();
+    let run_streams = state.run_streams.clone();
+    tokio::spawn(async move {
+        let _ = out_tx
+            .send(
+                serde_json::json!({
+                    "type": "sse.meta",
+                    "streamId": stream_id
+                })
+                .to_string(),
+            )
+            .await;
+
+        let cwd = PathBuf::from(&query.project_root);
+        let args = vec![
+            "run".to_string(),
+            "next".to_string(),
+            "--plan".to_string(),
+            query.plan_path,
+            "--adapter".to_string(),
+            query.adapter,
+            "--jsonl".to_string(),
+        ];
+
+        let mut child = match spawn_forge_stream(&app, &cwd, &args) {
+            Ok(c) => c,
+            Err(error) => {
+                let _ = out_tx
+                    .send(
+                        serde_json::json!({
+                            "type": "sse.error",
+                            "message": error
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                run_streams.remove(&stream_id);
+                return;
+            }
+        };
+
+        let mut stdin = match child.stdin.take() {
+            Some(s) => s,
+            None => {
+                let _ = out_tx
+                    .send(
+                        serde_json::json!({
+                            "type": "sse.error",
+                            "message": "child stdin missing"
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                run_streams.remove(&stream_id);
+                return;
+            }
+        };
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let mut stdout_lines = stdout.map(|s| BufReader::new(s).lines());
+        let mut stderr_lines = stderr.map(|s| BufReader::new(s).lines());
+
+        let pid = child.id();
+        let _ = out_tx
+            .send(
+                serde_json::json!({
+                    "type": "process.spawned",
+                    "pid": pid
+                })
+                .to_string(),
+            )
+            .await;
+
+        loop {
+            // Cancel takes precedence.
+            if *cancel_rx.borrow() {
+                let _ = child.start_kill();
+                let _ = out_tx
+                    .send(
+                        serde_json::json!({
+                            "type": "process.killed",
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                break;
+            }
+
+            tokio::select! {
+                _ = cancel_rx.changed() => {
+                    // Loop will observe borrow() and kill.
+                }
+                maybe_input = input_rx.recv() => {
+                    if let Some(text) = maybe_input {
+                        let mut bytes = text.into_bytes();
+                        if !bytes.ends_with(b"\n") {
+                            bytes.push(b'\n');
+                        }
+                        let _ = stdin.write_all(&bytes).await;
+                        let _ = stdin.flush().await;
+                    }
+                }
+                res = async {
+                    if let Some(lines) = &mut stdout_lines {
+                        lines.next_line().await
+                    } else {
+                        Ok(None)
+                    }
+                } => {
+                    match res {
+                        Ok(Some(text)) => {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                let _ = out_tx.send(trimmed.to_string()).await;
+                            }
+                        }
+                        Ok(None) => {
+                            stdout_lines = None;
+                        }
+                        Err(error) => {
+                            let _ = out_tx
+                                .send(serde_json::json!({"type":"process.stdout_error","message": error.to_string()}).to_string())
+                                .await;
+                            stdout_lines = None;
+                        }
+                    }
+                }
+                res = async {
+                    if let Some(lines) = &mut stderr_lines {
+                        lines.next_line().await
+                    } else {
+                        Ok(None)
+                    }
+                } => {
+                    match res {
+                        Ok(Some(text)) => {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                let _ = out_tx
+                                    .send(serde_json::json!({"type":"process.stderr","line": trimmed}).to_string())
+                                    .await;
+                            }
+                        }
+                        Ok(None) => {
+                            stderr_lines = None;
+                        }
+                        Err(error) => {
+                            let _ = out_tx
+                                .send(serde_json::json!({"type":"process.stderr_error","message": error.to_string()}).to_string())
+                                .await;
+                            stderr_lines = None;
+                        }
+                    }
+                }
+            }
+
+            if stdout_lines.is_none() && stderr_lines.is_none() {
+                break;
+            }
+        }
+
+        let status = child.wait().await.ok();
+        let code = status.as_ref().and_then(|s| s.code()).unwrap_or(-1);
+        let _ = out_tx
+            .send(
+                serde_json::json!({
+                    "type": "process.exit",
+                    "code": code
+                })
+                .to_string(),
+            )
+            .await;
+
+        run_streams.remove(&stream_id);
+    });
+
+    let stream = ReceiverStream::new(out_rx).map(|line| Ok(Event::default().data(line)));
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunNextStreamInputRequest {
+    stream_id: String,
+    text: String,
+}
+
+async fn run_next_stream_input(
+    State(state): State<ServerState>,
+    Json(body): Json<RunNextStreamInputRequest>,
+) -> Result<Json<bool>, (StatusCode, String)> {
+    let controls = state
+        .run_streams
+        .get(&body.stream_id)
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "stream not found"))?;
+    controls
+        .input_tx
+        .send(body.text)
+        .await
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "stream input channel closed"))?;
+    Ok(Json(true))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunNextStreamCancelRequest {
+    stream_id: String,
+}
+
+async fn run_next_stream_cancel(
+    State(state): State<ServerState>,
+    Json(body): Json<RunNextStreamCancelRequest>,
+) -> Result<Json<bool>, (StatusCode, String)> {
+    let controls = state
+        .run_streams
+        .get(&body.stream_id)
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "stream not found"))?;
+    controls
+        .cancel_tx
+        .send(true)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "stream cancel channel closed"))?;
+    Ok(Json(true))
 }
 
 #[derive(Deserialize)]
@@ -422,6 +775,25 @@ async fn packs_download(
             .app_data_dir()
             .map_err(|error| format!("resolve app data dir: {error}"))?;
         download_and_install_pack(&app_data, &body.pack_name, body.version.as_deref())
+    })
+    .await
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
+    .map(Json)
+    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PackContentQuery {
+    pack_path: String,
+}
+
+async fn packs_get_content(
+    Query(query): Query<PackContentQuery>,
+) -> Result<Json<PackContent>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = PathBuf::from(query.pack_path);
+        read_pack_content(&dir)
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -845,6 +1217,12 @@ struct DebugStatus {
     assets_dir_exists: bool,
 }
 
+async fn get_cwd() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::json!({ "cwd": cwd.to_string_lossy() })))
+}
+
 async fn debug_status(State(state): State<ServerState>) -> Json<DebugStatus> {
     let index_exists = state.frontend_dist.join("index.html").exists();
     let assets_dir_exists = state.frontend_dist.join("assets").is_dir();
@@ -866,16 +1244,22 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         frontend_dist: frontend_dist.clone(),
         bundled_packs_dir,
         terminal: TerminalManager::new(),
+        run_streams: RunStreamHub::default(),
     };
     let api = Router::new()
+        .route("/api/cwd", get(get_cwd))
         .route("/api/debug/status", get(debug_status))
         .route("/api/plan/validate", post(plan_validate))
         .route("/api/run/next", post(run_next))
+        .route("/api/run/next/stream", get(run_next_stream))
+        .route("/api/run/next/input", post(run_next_stream_input))
+        .route("/api/run/next/cancel", post(run_next_stream_cancel))
         .route("/api/evidence", get(get_evidence))
         .route("/api/project/guidance-status", get(project_get_guidance_status))
         .route("/api/packs/installed", get(packs_list_installed))
         .route("/api/packs/updates", get(packs_check_updates))
         .route("/api/packs/download", post(packs_download))
+        .route("/api/packs/content", get(packs_get_content))
         .route("/api/project/install-guidance", post(project_install_guidance))
         .route("/api/templates", get(list_templates))
         .route("/api/project/init", post(project_init))

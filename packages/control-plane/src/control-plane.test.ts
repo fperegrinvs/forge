@@ -5,6 +5,7 @@ import { chmod } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { ForgeControlPlane } from "./control-plane.js";
 import "./index.js";
+import type { RunContext } from "@forge/shared-utils";
 
 const planTemplate = {
   metadata: {
@@ -44,6 +45,100 @@ const planTemplate = {
 };
 
 describe("ForgeControlPlane", () => {
+  it("uses full-auto approval mode when stdin is not a TTY (non-interactive)", async () => {
+    // Given a non-interactive environment (no TTY)
+    const originalIsTTY = process.stdin.isTTY;
+    try {
+      Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+
+      // And a workspace with a passing gate
+      const workspace = await mkdtemp(join(tmpdir(), "forge-control-plane-approval-"));
+      const checksDir = join(workspace, "checks", "task-types", "implementation");
+      await mkdir(checksDir, { recursive: true });
+      const script = join(checksDir, "gate-green.sh");
+      await writeFile(script, "#!/usr/bin/env bash\necho pass\n", "utf8");
+      await chmod(script, 0o755);
+
+      const planPath = join(workspace, "plan.json");
+      await writeFile(planPath, JSON.stringify(planTemplate), "utf8");
+
+      // When runNext starts a run
+      let observed: RunContext["approvalMode"] | undefined;
+      const controlPlane = new ForgeControlPlane(workspace, () => ({
+        async startRun(context) {
+          observed = context.approvalMode;
+          return { runId: "run-approval" };
+        },
+        async *streamEvents() {
+          yield { type: "run.started", runId: "run-approval", at: new Date().toISOString() } as const;
+          yield { type: "run.completed", runId: "run-approval", exitCode: 0, at: new Date().toISOString() } as const;
+        },
+        async resume() {
+          return { runId: "run-approval" };
+        },
+        async cancel() {
+          return;
+        }
+      }));
+
+      await controlPlane.runNext(planPath, "codex", join(workspace, "checks", "task-types"));
+
+      // Then it uses full-auto to avoid interactive approval deadlocks
+      expect(observed).toBe("full-auto");
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
+    }
+  });
+
+  it("streams adapter events via onAdapterEvent hook", async () => {
+    // Given a workspace with a passing gate script
+    const workspace = await mkdtemp(join(tmpdir(), "forge-control-plane-hooks-"));
+    const checksDir = join(workspace, "checks", "task-types", "implementation");
+    await mkdir(checksDir, { recursive: true });
+    const script = join(checksDir, "gate-green.sh");
+    await writeFile(script, "#!/usr/bin/env bash\necho pass\n", "utf8");
+    await chmod(script, 0o755);
+
+    // And a plan with a single runnable task
+    const planPath = join(workspace, "plan.json");
+    await writeFile(planPath, JSON.stringify(planTemplate), "utf8");
+
+    // When runNext is executed with an onAdapterEvent hook
+    const observed: string[] = [];
+    const controlPlane = new ForgeControlPlane(workspace, () => ({
+      async startRun() {
+        return { runId: "run-hooks" };
+      },
+      async *streamEvents() {
+        yield { type: "run.started", runId: "run-hooks", at: new Date().toISOString() } as const;
+        yield {
+          type: "run.output",
+          runId: "run-hooks",
+          stream: "stdout",
+          chunk: "hello",
+          at: new Date().toISOString()
+        } as const;
+        yield { type: "run.completed", runId: "run-hooks", exitCode: 0, at: new Date().toISOString() } as const;
+      },
+      async resume() {
+        return { runId: "run-hooks" };
+      },
+      async cancel() {
+        return;
+      }
+    }));
+
+    const result = await controlPlane.runNext(planPath, "codex", join(workspace, "checks", "task-types"), {
+      onAdapterEvent: (event) => {
+        observed.push(event.type);
+      }
+    });
+
+    // Then the hook receives adapter events as they occur
+    expect(result.state).toBe("completed");
+    expect(observed).toEqual(["run.started", "run.output", "run.completed"]);
+  });
+
   it("runs next task and updates status", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "forge-control-plane-"));
     const checksDir = join(workspace, "checks", "task-types", "implementation");

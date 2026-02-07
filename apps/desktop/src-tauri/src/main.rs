@@ -3,6 +3,7 @@
 
 mod forge_cli;
 mod packs;
+mod phase_gates;
 mod http_server;
 mod terminal;
 

@@ -8,6 +8,10 @@ import { exists, writeJsonFile } from "@forge/shared-utils";
 import type { AdapterEvent, AgentAdapter, CheckResult, RunContext } from "@forge/shared-utils";
 import type { AdapterFactory, AdapterType, RunNextResult, RuntimeState, TaskState } from "./types.js";
 
+type RunNextHooks = {
+  onAdapterEvent?: (event: AdapterEvent) => void;
+};
+
 function buildDefaultAdapterFactory(): AdapterFactory {
   return (type: AdapterType): AgentAdapter => {
     if (type === "codex") {
@@ -65,6 +69,12 @@ export class ForgeControlPlane {
     this.evidenceRoot = join(this.workspaceRoot, ".forge", "evidence");
   }
 
+  private resolveApprovalMode(): NonNullable<RunContext["approvalMode"]> {
+    // Desktop/CI runs are often non-interactive. "suggest" can deadlock because adapters
+    // may prompt for approval but receive no stdin. Prefer full-auto when no TTY.
+    return process.stdin.isTTY ? "suggest" : "full-auto";
+  }
+
   async planValidate(planPath: string) {
     const plan = await loadPlan(planPath);
     const schema = await validatePlanSchema(plan);
@@ -83,7 +93,8 @@ export class ForgeControlPlane {
   async runNext(
     planPath: string,
     adapterType: AdapterType,
-    checkRoot = join(this.workspaceRoot, "checks", "task-types")
+    checkRoot = join(this.workspaceRoot, "checks", "task-types"),
+    hooks?: RunNextHooks
   ): Promise<RunNextResult> {
     const validation = await this.planValidate(planPath);
     if (!validation.valid) {
@@ -130,7 +141,7 @@ export class ForgeControlPlane {
       prompt: `${nextTask.name}\n\n${nextTask.description}`,
       workingDirectory: this.workspaceRoot,
       allowedTools: [],
-      approvalMode: "suggest"
+      approvalMode: this.resolveApprovalMode()
     };
 
     const startedRun = await adapter.startRun(runContext);
@@ -140,6 +151,7 @@ export class ForgeControlPlane {
 
     for await (const event of adapter.streamEvents(runId)) {
       events.push(event);
+      hooks?.onAdapterEvent?.(event);
     }
 
     if (!externalRunId) {

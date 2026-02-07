@@ -32,6 +32,7 @@ export type RunNextResult = {
   resumeCommand?: string;
   classification?: string;
   checksSummary?: string[];
+  llmOutput?: string[];
   message: string;
 };
 
@@ -71,6 +72,28 @@ export async function runNext(projectRoot: string, planPath: string, adapter: "c
   return await apiJson<RunNextResult>("/api/run/next", {
     method: "POST",
     body: JSON.stringify({ projectRoot, planPath, adapter })
+  });
+}
+
+export function runNextStreamUrl(projectRoot: string, planPath: string, adapter: "codex" | "claude"): string {
+  const url = new URL("/api/run/next/stream", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  url.searchParams.set("planPath", planPath);
+  url.searchParams.set("adapter", adapter);
+  return url.toString();
+}
+
+export async function runNextStreamInput(streamId: string, text: string): Promise<boolean> {
+  return await apiJson<boolean>("/api/run/next/input", {
+    method: "POST",
+    body: JSON.stringify({ streamId, text })
+  });
+}
+
+export async function runNextStreamCancel(streamId: string): Promise<boolean> {
+  return await apiJson<boolean>("/api/run/next/cancel", {
+    method: "POST",
+    body: JSON.stringify({ streamId })
   });
 }
 
@@ -143,6 +166,11 @@ export async function projectInit(request: ProjectInitRequest): Promise<ProjectI
   });
 }
 
+export async function getCwd(): Promise<string> {
+  const result = await apiJson<{ cwd: string }>("/api/cwd", { method: "GET" });
+  return result.cwd;
+}
+
 export async function selectFolder(): Promise<string | null> {
   const result = await apiJson<{ path: string | null }>("/api/dialog/select-folder", { method: "GET" });
   return result.path;
@@ -170,4 +198,3 @@ export async function plansRead(planPath: string): Promise<unknown> {
   url.searchParams.set("planPath", planPath);
   return await apiJson<unknown>(url.toString(), { method: "GET" });
 }
-

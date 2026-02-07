@@ -49,15 +49,11 @@ describe("CodexAdapter", () => {
     expect(resumed.externalRunId).toBe("thread-123");
   });
 
-  it("passes approval mode to codex exec", async () => {
+  it("does not pass --full-auto for suggest approval mode", async () => {
     let seenArgs: string[] = [];
     const adapter = new CodexAdapter(async (_command, args) => {
       seenArgs = args;
-      return {
-        exitCode: 0,
-        stdout: "{}\n",
-        stderr: ""
-      };
+      return { exitCode: 0, stdout: "{}\n", stderr: "" };
     });
 
     const handle = await adapter.startRun({
@@ -72,7 +68,29 @@ describe("CodexAdapter", () => {
       // drain
     }
 
-    expect(seenArgs).toEqual(["exec", "--json", "--approval-mode", "suggest", "hello"]);
+    expect(seenArgs).toEqual(["exec", "--json", "hello"]);
+  });
+
+  it("maps full-auto approval mode to --full-auto flag", async () => {
+    let seenArgs: string[] = [];
+    const adapter = new CodexAdapter(async (_command, args) => {
+      seenArgs = args;
+      return { exitCode: 0, stdout: "{}\n", stderr: "" };
+    });
+
+    const handle = await adapter.startRun({
+      taskId: "task-3b",
+      prompt: "hello",
+      workingDirectory: process.cwd(),
+      allowedTools: [],
+      approvalMode: "full-auto"
+    });
+
+    for await (const _event of adapter.streamEvents(handle.runId)) {
+      // drain
+    }
+
+    expect(seenArgs).toEqual(["exec", "--json", "--full-auto", "hello"]);
   });
 
   it("fails resume when external run id was not observed", async () => {

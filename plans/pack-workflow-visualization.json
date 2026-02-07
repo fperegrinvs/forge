@@ -1,0 +1,269 @@
+{
+  "metadata": {
+    "project": "forge",
+    "created": "2026-02-07",
+    "last_updated": "2026-02-07",
+    "spec_version": "v2",
+    "approved": false
+  },
+  "context": {
+    "goals": [
+      "Visualize a selected guidance pack's workflow as a flow diagram showing phases and gates",
+      "Allow users to associate custom validation scripts with each workflow phase via a file picker",
+      "Persist phase-gate script bindings per project in .forge/phase-gates.json"
+    ],
+    "constraints": [
+      "Extend the existing Packs tab — no new top-level tabs",
+      "Reuse Vue Flow (already a dependency) for the pipeline visualization",
+      "Phase gate bindings are per-project, not per-pack",
+      "Backend changes go in http_server.rs following existing Axum patterns",
+      "No Bun-native APIs — Node-compatible only in TypeScript code"
+    ],
+    "tech_decisions": {
+      "visualization": "Vue Flow — reuse existing @vue-flow/core dependency for phase pipeline DAG",
+      "storage": ".forge/phase-gates.json — project-scoped JSON file alongside existing .forge/state.json",
+      "pack_parsing": "Rust reads pack manifest.json + AGENTS.md to extract workflow phases and gates",
+      "file_picker": "rfd crate (already used for folder picker) extended to select individual .sh files"
+    },
+    "architecture": "modulith"
+  },
+  "tasks": [
+    {
+      "id": "pack-content-api",
+      "task_type": "feature",
+      "name": "Backend endpoint to read pack workflow content",
+      "description": "Add GET /api/packs/content?packPath=... endpoint that reads a pack directory and returns structured workflow data: phases with their gates extracted from AGENTS.md, plus lists of rules and skills. Parse the Phase→Gate→Commit table from AGENTS.md to extract phase definitions programmatically.",
+      "files": [
+        "apps/desktop/src-tauri/src/http_server.rs",
+        "apps/desktop/src-tauri/src/packs.rs"
+      ],
+      "dependencies": [],
+      "acceptance_criteria": [
+        "GET /api/packs/content returns JSON with name, version, phases array, rules list, and skills list",
+        "Each phase entry includes id, gate name, and diagnostic boolean",
+        "Returns 400 if pack path is invalid or manifest.json is missing",
+        "Phases are extracted by parsing the AGENTS.md Phase→Gate table"
+      ],
+      "verification_command": "bun run test && bun run typecheck && bun run lint",
+      "tests": {
+        "bdd_scenarios": [
+          "Given a valid pack path, When GET /api/packs/content is called, Then it returns phases [spec, implement, refactor, document, commit] with correct gate names",
+          "Given a pack path with no AGENTS.md, When GET /api/packs/content is called, Then phases array is empty and rules/skills are still returned",
+          "Given an invalid pack path, When GET /api/packs/content is called, Then it returns 400 with error message"
+        ],
+        "property_invariants": [
+          "invariant — phases array always contains entries in spec→implement→refactor→document→commit order when AGENTS.md is present"
+        ],
+        "contract_tests": [
+          "PackContentResponse JSON shape matches the TypeScript PackContent type"
+        ]
+      },
+      "documentation": {
+        "updates": ["docs/desktop-api.md"],
+        "decision_notes": "Parse AGENTS.md table rather than hardcoding phases — makes pack content truly data-driven. Fall back to empty phases if AGENTS.md is absent."
+      }
+    },
+    {
+      "id": "phase-gates-storage",
+      "task_type": "feature",
+      "name": "Phase gate binding data model and file storage",
+      "description": "Add Rust functions to read/write .forge/phase-gates.json for a given project root. The file maps phase IDs to optional script paths. Create the PhaseGateBindings serde struct and read_phase_gates / write_phase_gates functions in a new phase_gates module or within packs.rs.",
+      "files": [
+        "apps/desktop/src-tauri/src/http_server.rs",
+        "apps/desktop/src-tauri/src/packs.rs"
+      ],
+      "dependencies": [],
+      "acceptance_criteria": [
+        "read_phase_gates returns a map of phase→script_path from .forge/phase-gates.json",
+        "write_phase_gates persists the bindings atomically (write to tmp then rename)",
+        "Missing .forge/ dir or missing file returns an empty bindings map (no error)",
+        "Script paths are stored relative to project root"
+      ],
+      "verification_command": "bun run test && bun run typecheck && bun run lint",
+      "tests": {
+        "bdd_scenarios": [
+          "Given no .forge/phase-gates.json exists, When read_phase_gates is called, Then it returns an empty map",
+          "Given a valid bindings map, When write_phase_gates is called, Then .forge/phase-gates.json contains the serialized JSON",
+          "Given an existing phase-gates.json, When read_phase_gates is called, Then it returns the previously written bindings"
+        ],
+        "property_invariants": [
+          "round-trip — write then read returns the original bindings map"
+        ],
+        "contract_tests": [
+          "PhaseGateBindings serde round-trip matches expected JSON shape"
+        ]
+      },
+      "documentation": {
+        "updates": ["docs/desktop-api.md"],
+        "decision_notes": "Store phase gate bindings in .forge/ alongside state.json to keep all runtime config in one place. Use atomic write to prevent partial writes."
+      }
+    },
+    {
+      "id": "phase-gates-api",
+      "task_type": "feature",
+      "name": "Backend endpoints for phase gate bindings CRUD",
+      "description": "Add GET /api/phase-gates?projectRoot=... and PUT /api/phase-gates endpoints. GET reads bindings from .forge/phase-gates.json. PUT writes the full bindings map. Both delegate to the storage functions from phase-gates-storage task.",
+      "files": [
+        "apps/desktop/src-tauri/src/http_server.rs"
+      ],
+      "dependencies": ["phase-gates-storage"],
+      "acceptance_criteria": [
+        "GET /api/phase-gates returns the current phase-gate bindings as JSON",
+        "PUT /api/phase-gates persists new bindings and returns the saved state",
+        "Both endpoints require projectRoot parameter"
+      ],
+      "verification_command": "bun run test && bun run typecheck && bun run lint",
+      "tests": {
+        "bdd_scenarios": [
+          "Given no bindings exist, When GET /api/phase-gates is called, Then it returns an empty phases map",
+          "Given a PUT with {spec: './gates/spec.sh'}, When GET /api/phase-gates is called, Then it returns the saved binding"
+        ],
+        "property_invariants": [
+          "round-trip — PUT then GET returns the same bindings"
+        ],
+        "contract_tests": [
+          "PhaseGateBindings REST response matches frontend PhaseGateBindings type"
+        ]
+      },
+      "documentation": {
+        "updates": ["docs/desktop-api.md"],
+        "decision_notes": "PUT replaces the entire bindings map (not PATCH) to keep the API simple and avoid merge conflicts."
+      }
+    },
+    {
+      "id": "select-file-dialog",
+      "task_type": "feature",
+      "name": "Native file picker dialog for script selection",
+      "description": "Add GET /api/dialog/select-file endpoint using the rfd crate (already available for select-folder). Open a native file dialog filtered to shell scripts (.sh). Return the selected path or null.",
+      "files": [
+        "apps/desktop/src-tauri/src/http_server.rs",
+        "apps/desktop/src/composables/useControlPlane.ts"
+      ],
+      "dependencies": [],
+      "acceptance_criteria": [
+        "GET /api/dialog/select-file opens a native file dialog",
+        "Dialog filters to .sh files by default",
+        "Returns {path: string | null} matching the existing select-folder pattern",
+        "Frontend composable exports a selectFile() function"
+      ],
+      "verification_command": "bun run test && bun run typecheck && bun run lint",
+      "tests": {
+        "bdd_scenarios": [
+          "Given the selectFile composable function, When called, Then it returns a string path or null",
+          "Given the /api/dialog/select-file endpoint, When called, Then it returns JSON with a path field"
+        ],
+        "property_invariants": [],
+        "contract_tests": [
+          "selectFile return type matches {path: string | null}"
+        ]
+      },
+      "documentation": {
+        "updates": ["docs/desktop-api.md"],
+        "decision_notes": "Reuse the rfd crate pattern from select-folder. Filter to .sh to guide users toward valid gate scripts."
+      }
+    },
+    {
+      "id": "frontend-pack-api",
+      "task_type": "feature",
+      "name": "Frontend composable functions for pack content and phase gates",
+      "description": "Add TypeScript types (PackContent, WorkflowPhase, PhaseGateBindings) and composable functions (packsGetContent, phaseGatesGet, phaseGatesPut) to useControlPlane.ts.",
+      "files": [
+        "apps/desktop/src/composables/useControlPlane.ts"
+      ],
+      "dependencies": ["pack-content-api", "phase-gates-api"],
+      "acceptance_criteria": [
+        "PackContent type includes name, version, phases array, rules and skills arrays",
+        "WorkflowPhase type includes id, gate, and diagnostic fields",
+        "PhaseGateBindings type maps phase IDs to optional script paths",
+        "packsGetContent(packPath) fetches pack workflow content",
+        "phaseGatesGet(projectRoot) fetches current bindings",
+        "phaseGatesPut(projectRoot, bindings) saves updated bindings"
+      ],
+      "verification_command": "bun run test && bun run typecheck && bun run lint",
+      "tests": {
+        "bdd_scenarios": [
+          "Given the PackContent type, When a valid API response is received, Then it type-checks without errors",
+          "Given phaseGatesPut is called with bindings, When phaseGatesGet is called, Then it returns the saved bindings"
+        ],
+        "property_invariants": [
+          "invariant — all composable functions throw on non-ok HTTP responses"
+        ],
+        "contract_tests": [
+          "Frontend PackContent type fields match backend PackContentResponse struct"
+        ]
+      },
+      "documentation": {
+        "updates": ["docs/desktop-api.md"],
+        "decision_notes": "Keep all API call functions in the single useControlPlane.ts composable for consistency with existing patterns."
+      }
+    },
+    {
+      "id": "workflow-graph-component",
+      "task_type": "feature",
+      "name": "PackWorkflowGraph Vue component for phase pipeline visualization",
+      "description": "Create a new PackWorkflowGraph.vue component that renders workflow phases as a horizontal pipeline using Vue Flow. Each phase is a node showing phase name and gate name. Edges connect phases in sequence (spec→implement→refactor→document→commit). Nodes are color-coded: grey for no script bound, primary color for script bound. Clicking a node emits a 'phase-click' event with the phase ID.",
+      "files": [
+        "apps/desktop/src/components/PackWorkflowGraph.vue"
+      ],
+      "dependencies": ["frontend-pack-api"],
+      "acceptance_criteria": [
+        "Component renders 5 phase nodes in a horizontal pipeline layout",
+        "Each node displays the phase name and its gate name",
+        "Edges connect phases in order: spec→implement→refactor→document→commit",
+        "Nodes with a bound script show a distinct visual indicator (color or icon)",
+        "Clicking a node emits 'phase-click' with the phase ID",
+        "Component accepts phases array and bindings map as props"
+      ],
+      "verification_command": "bun run test && bun run typecheck && bun run lint",
+      "tests": {
+        "bdd_scenarios": [
+          "Given an array of 5 workflow phases, When PackWorkflowGraph renders, Then 5 nodes and 4 sequential edges are displayed",
+          "Given a phase with a bound script, When PackWorkflowGraph renders, Then that node has a visual script indicator",
+          "Given a user clicks a phase node, When the click event fires, Then 'phase-click' is emitted with the correct phase ID"
+        ],
+        "property_invariants": [
+          "invariant — edge count is always phases.length - 1 for a sequential pipeline"
+        ],
+        "contract_tests": []
+      },
+      "documentation": {
+        "updates": ["docs/desktop-api.md"],
+        "decision_notes": "Horizontal layout (left-to-right) mirrors the natural reading of spec→...→commit. Reuse Vue Flow from PlanGraph.vue but with custom node styling for phases."
+      }
+    },
+    {
+      "id": "packs-tab-integration",
+      "task_type": "feature",
+      "name": "Integrate workflow visualization and phase gate binding into Packs tab",
+      "description": "Expand the Packs tab in App.vue to show a pack detail area when a pack is selected from the Installed Packs list. The detail area contains the PackWorkflowGraph component and a panel showing the currently bound script for the selected phase. Clicking a phase node opens the file picker to bind a validation script. The binding is saved via PUT /api/phase-gates. Include a 'Clear' button to remove a binding.",
+      "files": [
+        "apps/desktop/src/App.vue"
+      ],
+      "dependencies": ["workflow-graph-component", "select-file-dialog"],
+      "acceptance_criteria": [
+        "Clicking a pack in the Installed Packs list loads its workflow content and displays the PackWorkflowGraph",
+        "Clicking a phase node in the graph opens the native file picker",
+        "Selecting a script file binds it to the phase and saves via PUT /api/phase-gates",
+        "Bound scripts are visually reflected in the graph nodes",
+        "A 'Clear' button removes the selected phase's binding",
+        "Phase gate bindings persist across page refreshes"
+      ],
+      "verification_command": "bun run test && bun run typecheck && bun run lint",
+      "tests": {
+        "bdd_scenarios": [
+          "Given a pack is selected, When the Packs tab shows the detail panel, Then the workflow graph is rendered with phases from the pack",
+          "Given a user clicks a phase node, When a file is selected in the dialog, Then the phase binding is saved and the node updates visually",
+          "Given a user clicks Clear on a bound phase, When the binding is removed, Then the node reverts to unbound styling"
+        ],
+        "property_invariants": [
+          "invariant — saving bindings then refreshing always shows the same bindings"
+        ],
+        "contract_tests": []
+      },
+      "documentation": {
+        "updates": ["docs/desktop-api.md"],
+        "decision_notes": "Pack selection converts the Installed Packs list into a master-detail layout. The workflow graph occupies the full-width area below the pack list when a pack is selected."
+      }
+    }
+  ]
+}

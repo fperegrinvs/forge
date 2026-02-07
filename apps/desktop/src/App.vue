@@ -51,8 +51,31 @@
                   <div class="d-flex flex-wrap ga-2">
                     <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" @click="showNewPlan = true">New Plan</v-btn>
                     <v-btn color="primary" @click="onValidate">Validate Plan</v-btn>
-                    <v-btn color="primary" variant="outlined" @click="onRunNext">Run</v-btn>
+                    <v-btn color="primary" variant="outlined" @click="onRunNextStream">Run</v-btn>
+                    <v-btn color="primary" variant="text" @click="onRunNext">Run (Legacy)</v-btn>
                     <v-btn color="secondary" variant="outlined" @click="onOpenEvidence">Open Evidence</v-btn>
+                  </div>
+
+                  <div class="d-flex flex-wrap ga-2 align-center mt-3">
+                    <v-text-field
+                      v-model="streamInput"
+                      label="Send input to LLM (stream mode)"
+                      density="comfortable"
+                      :disabled="!streaming || !streamId"
+                      hide-details
+                      @keyup.enter="onSendStreamInput"
+                    />
+                    <v-btn
+                      color="primary"
+                      variant="outlined"
+                      :disabled="!streaming || !streamId || !streamInput.trim()"
+                      @click="onSendStreamInput"
+                    >
+                      Send
+                    </v-btn>
+                    <v-btn color="secondary" variant="outlined" :disabled="!streaming || !streamId" @click="onCancelStream">
+                      Cancel
+                    </v-btn>
                   </div>
                 </v-card>
 
@@ -74,6 +97,10 @@
                   <h2 class="text-h6 mb-2">Current Task</h2>
                   <p><strong>ID:</strong> {{ current.taskId || "-" }}</p>
                   <p><strong>Status:</strong> {{ current.state || "-" }}</p>
+                  <p><strong>Run ID:</strong> {{ current.runId || "-" }}</p>
+                  <p><strong>External Run ID:</strong> {{ current.externalRunId || "-" }}</p>
+                  <p><strong>Resume:</strong> {{ current.resumeCommand || "-" }}</p>
+                  <p><strong>Stream ID:</strong> {{ streamId || "-" }}</p>
                   <p><strong>Message:</strong> {{ current.message || "-" }}</p>
                 </v-card>
 
@@ -204,6 +231,7 @@ import CreateProjectDialog from "./components/CreateProjectDialog.vue";
 import NewPlanDialog from "./components/NewPlanDialog.vue";
 import PlanGraph from "./components/PlanGraph.vue";
 import {
+  getCwd,
   getEvidence,
   packsCheckUpdates,
   packsDownload,
@@ -215,6 +243,9 @@ import {
   projectGetGuidanceStatus,
   projectInstallGuidance,
   runNext,
+  runNextStreamCancel,
+  runNextStreamInput,
+  runNextStreamUrl,
   selectFolder,
   type InstalledPack,
   type PlanFileEntry,
@@ -246,6 +277,11 @@ const current = reactive<RunNextResult>({
   state: "idle",
   message: "Not started"
 });
+
+const streaming = ref(false);
+const streamId = ref("");
+const streamInput = ref("");
+let eventSource: EventSource | null = null;
 
 type DiscoveredPlan = {
   filename: string;
@@ -350,10 +386,16 @@ watch(tab, (newTab) => {
 
 onUnmounted(() => {
   stopPolling();
+  stopStream();
 });
 
-// Start polling if we're on the orchestrate tab initially
-onMounted(() => {
+// Resolve cwd on startup, then start polling
+onMounted(async () => {
+  try {
+    projectRoot.value = await getCwd();
+  } catch {
+    // fall back to "." if cwd resolution fails
+  }
   if (tab.value === "orchestrate") {
     startPolling();
   }
@@ -435,11 +477,25 @@ async function onValidate(): Promise<void> {
 
 async function onRunNext(): Promise<void> {
   try {
+    current.state = "running";
+    current.taskId = undefined;
+    current.runId = undefined;
+    current.externalRunId = undefined;
+    current.resumeCommand = undefined;
+    current.message = "Running...";
+    logs.value.unshift("Run -> started");
+
     const result = await runNext(projectRoot.value, planPath.value, adapter.value);
     current.state = result.state;
     current.taskId = result.taskId;
+    current.runId = result.runId;
+    current.externalRunId = result.externalRunId;
+    current.resumeCommand = result.resumeCommand;
     current.message = result.message;
     logs.value.unshift(`Run -> ${result.message}`);
+    if (result.runId) logs.value.unshift(`  runId: ${result.runId}`);
+    if (result.externalRunId) logs.value.unshift(`  externalRunId: ${result.externalRunId}`);
+    if (result.resumeCommand) logs.value.unshift(`  resume: ${result.resumeCommand}`);
     if (result.classification) {
       logs.value.unshift(`  classification: ${result.classification}`);
     }
@@ -448,8 +504,152 @@ async function onRunNext(): Promise<void> {
         logs.value.unshift(`  ${check}`);
       }
     }
+    if (result.llmOutput?.length) {
+      logs.value.unshift("  adapter output (tail):");
+      for (const line of result.llmOutput) {
+        logs.value.unshift(`    ${line}`);
+      }
+    }
   } catch (error) {
     logs.value.unshift(`Run -> error: ${String(error)}`);
+  }
+}
+
+function stopStream(): void {
+  streaming.value = false;
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+}
+
+function pushLog(line: string): void {
+  logs.value.unshift(line);
+  if (logs.value.length > 800) {
+    logs.value.length = 800;
+  }
+}
+
+async function onRunNextStream(): Promise<void> {
+  stopStream();
+
+  current.state = "running";
+  current.taskId = undefined;
+  current.runId = undefined;
+  current.externalRunId = undefined;
+  current.resumeCommand = undefined;
+  current.message = "Running (stream)...";
+  streamId.value = "";
+  streamInput.value = "";
+  streaming.value = true;
+
+  pushLog("Run (stream) -> started");
+
+  const url = runNextStreamUrl(projectRoot.value, planPath.value, adapter.value);
+  eventSource = new EventSource(url);
+
+  eventSource.addEventListener("message", (event) => {
+    const raw = (event as MessageEvent).data as string;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      pushLog(`[sse] ${raw}`);
+      return;
+    }
+
+    const type = String(parsed?.type ?? "");
+    if (type === "sse.meta") {
+      streamId.value = String(parsed.streamId ?? "");
+      if (streamId.value) pushLog(`  streamId: ${streamId.value}`);
+      return;
+    }
+
+    if (type === "process.stderr") {
+      pushLog(`  [forge stderr] ${String(parsed.line ?? "")}`);
+      return;
+    }
+
+    if (type === "adapter.event") {
+      const e = parsed.event;
+      if (e?.type === "run.output") {
+        const stream = String(e.stream ?? "stdout");
+        const chunk = String(e.chunk ?? "");
+        pushLog(`  [${stream}] ${chunk}`);
+      } else if (e?.type === "run.failed") {
+        pushLog(`  [failed] ${String(e.reason ?? "")}`);
+      } else if (e?.type) {
+        pushLog(`  [event] ${String(e.type)}`);
+      }
+      return;
+    }
+
+    if (type === "run.next.result") {
+      const result = parsed.result as RunNextResult | undefined;
+      if (result) {
+        current.state = result.state;
+        current.taskId = result.taskId;
+        current.runId = result.runId;
+        current.externalRunId = result.externalRunId;
+        current.resumeCommand = result.resumeCommand;
+        current.message = result.message;
+        pushLog(`Run (stream) -> ${result.message}`);
+        if (result.runId) pushLog(`  runId: ${result.runId}`);
+        if (result.externalRunId) pushLog(`  externalRunId: ${result.externalRunId}`);
+        if (result.resumeCommand) pushLog(`  resume: ${result.resumeCommand}`);
+        if (result.classification) pushLog(`  classification: ${result.classification}`);
+        if (result.checksSummary?.length) {
+          for (const check of result.checksSummary) {
+            pushLog(`  ${check}`);
+          }
+        }
+        if (result.llmOutput?.length) {
+          pushLog("  adapter output (tail):");
+          for (const line of result.llmOutput) {
+            pushLog(`    ${line}`);
+          }
+        }
+      } else {
+        pushLog("Run (stream) -> missing result payload");
+      }
+      stopStream();
+      return;
+    }
+
+    if (type === "process.exit") {
+      pushLog(`  [forge exit] ${String(parsed.code ?? "")}`);
+      return;
+    }
+
+    pushLog(type ? `  [${type}] ${raw}` : `  [sse] ${raw}`);
+  });
+
+  eventSource.addEventListener("error", () => {
+    pushLog("Run (stream) -> SSE error/disconnected");
+  });
+}
+
+async function onSendStreamInput(): Promise<void> {
+  const text = streamInput.value.trim();
+  if (!text || !streamId.value) return;
+  try {
+    await runNextStreamInput(streamId.value, text);
+    pushLog(`  [input] ${text}`);
+    streamInput.value = "";
+  } catch (error) {
+    pushLog(`  [input error] ${String(error)}`);
+  }
+}
+
+async function onCancelStream(): Promise<void> {
+  if (!streamId.value) return;
+  try {
+    await runNextStreamCancel(streamId.value);
+    pushLog("Run (stream) -> cancel requested");
+  } catch (error) {
+    pushLog(`Run (stream) -> cancel error: ${String(error)}`);
+  } finally {
+    stopStream();
   }
 }
 

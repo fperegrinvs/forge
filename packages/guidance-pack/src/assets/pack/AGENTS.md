@@ -33,6 +33,18 @@ Workflow policy version: 1.2.0
 - If a gate fails, fix the issue in the current phase. Do not advance.
 - If spec-phase tests pass immediately, the specification is too weak — strengthen it.
 
+## Task Execution Protocol (Enforced)
+
+- Work is organized as discrete tasks (bugfixes, features, refactors). Finish one task at a time.
+- For each task:
+  1. Write a failing test first (RED). Tests must include explicit `Given/When/Then` comments.
+  2. Implement the minimum change to pass (GREEN).
+  3. Run the phase gate for the current phase (see Canonical Gates).
+  4. Commit immediately after the gate passes with a message that names the task.
+  5. Push the branch after each task commit (no piling up multiple tasks unpushed).
+- Do not “skip tests because it’s small”. If you can’t write a meaningful test, stop and document why in `decisions.md` and/or update these guidelines to make the expectation clear.
+- Do not substitute alternate commands for the Canonical Gates. If `bun` is missing, install it and re-run the gate.
+
 ## Phase → Gate → Commit
 
 | Phase | Gate | Commit | Diagnostic |

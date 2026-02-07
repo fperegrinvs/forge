@@ -16,6 +16,9 @@ import {
   projectGetGuidanceStatus,
   projectInit,
   projectInstallGuidance,
+  runNextStreamCancel,
+  runNextStreamInput,
+  runNextStreamUrl,
   runNext,
   selectFolder
 } from "./useControlPlane";
@@ -64,6 +67,55 @@ describe("useControlPlane", () => {
     expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json", adapter: "codex" }));
     expect(init?.headers).toBeInstanceOf(Headers);
     expect((init!.headers as Headers).get("content-type")).toBe("application/json");
+  });
+
+  it("builds run_next_stream URL with expected query params", async () => {
+    // Given a project root and plan path
+    // When the run next stream URL is built
+    const url = runNextStreamUrl("/tmp/project", "/tmp/plan.json", "codex");
+
+    // Then it targets the SSE endpoint with required query params
+    expect(url).toBe(
+      "http://localhost:1420/api/run/next/stream?projectRoot=%2Ftmp%2Fproject&planPath=%2Ftmp%2Fplan.json&adapter=codex"
+    );
+  });
+
+  it("calls run_next_stream_input", async () => {
+    // Given the backend accepts input
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => true
+    });
+
+    // When stream input is sent
+    const result = await runNextStreamInput("stream-1", "hello");
+
+    // Then the expected API call occurs
+    expect(result).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/run/next/input");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-1", text: "hello" }));
+  });
+
+  it("calls run_next_stream_cancel", async () => {
+    // Given the backend accepts cancellation
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => true
+    });
+
+    // When stream cancel is requested
+    const result = await runNextStreamCancel("stream-2");
+
+    // Then the expected API call occurs
+    expect(result).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/run/next/cancel");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-2" }));
   });
 
   it("calls packs + guidance endpoints", async () => {

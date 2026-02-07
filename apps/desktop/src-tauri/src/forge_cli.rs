@@ -84,3 +84,22 @@ pub fn run_forge_json(app: &AppHandle, cwd: &Path, args: &[String]) -> Result<se
   serde_json::from_str::<serde_json::Value>(&stdout)
     .map_err(|error| format!("forge did not return valid JSON: {error}. stdout: {}", stdout.trim()))
 }
+
+pub fn spawn_forge_stream(
+  app: &AppHandle,
+  cwd: &Path,
+  args: &[String],
+) -> Result<tokio::process::Child, String> {
+  let (bin, base_args) = resolve_forge_command(app);
+  let mut cmd = tokio::process::Command::new(&bin);
+  cmd.current_dir(cwd)
+    .env("PATH", augmented_path())
+    .args(base_args)
+    .args(args)
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
+
+  cmd.spawn()
+    .map_err(|error| format!("failed to spawn forge command {bin:?}: {error}"))
+}

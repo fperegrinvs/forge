@@ -227,9 +227,35 @@ export function buildCli(): Command {
     .requiredOption("--plan <path>", "plan path")
     .option("--adapter <name>", "codex|claude", "codex")
     .option("--json", "machine output")
-    .action(async (options: JsonFlag & { plan: string; adapter: AdapterName }) => {
+    .option("--jsonl", "stream JSONL events to stdout", false)
+    .action(async (options: JsonFlag & { jsonl?: boolean; plan: string; adapter: AdapterName }) => {
       try {
         const controlPlane = new ForgeControlPlane(process.cwd());
+        if (options.jsonl) {
+          const writeLine = (value: unknown) => {
+            process.stdout.write(`${JSON.stringify(value)}\n`);
+          };
+
+          writeLine({
+            type: "run.next.started",
+            plan: resolve(options.plan),
+            adapter: options.adapter,
+            at: new Date().toISOString()
+          });
+
+          const result = await controlPlane.runNext(resolve(options.plan), options.adapter, undefined, {
+            onAdapterEvent: (event) => {
+              writeLine({ type: "adapter.event", event });
+            }
+          });
+
+          writeLine({ type: "run.next.result", result });
+          if (result.state === "failed") {
+            exit(ExitCode.RuntimeFailed);
+          }
+          return;
+        }
+
         const result = await controlPlane.runNext(resolve(options.plan), options.adapter);
 
         if (result.state === "failed") {
