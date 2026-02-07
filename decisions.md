@@ -2,6 +2,15 @@
 
 Track repository-level technical decisions and rationale.
 
+## 2026-02-07 (planning agent with embedded terminal)
+- Added `plan-guided` skill to the guidance pack — extends `plan-author` with enforced constraints for interactive plan creation: schema v2 compliance, BDD acceptance criteria required, 80% coverage targets, save to `plans/` directory.
+- Chose `portable-pty` (Rust crate) for cross-platform PTY spawning — supports macOS, Linux, and Windows without platform-specific code.
+- Terminal I/O streams over Axum WebSocket (`GET /api/terminal/:id/ws`) rather than Tauri IPC — natural fit for high-frequency bidirectional streaming on the existing single-origin HTTP server.
+- Created `TerminalManager` in `terminal.rs` with spawn/kill/resize/take_io lifecycle and a 30-minute session timeout to prevent orphaned PTY processes.
+- Frontend uses xterm.js (`@xterm/xterm`) with FitAddon and WebLinksAddon — industry-standard terminal emulator for web, with ResizeObserver for automatic PTY resize on container changes.
+- `useTerminal.ts` composable follows the same fetch-wrapper pattern as `useControlPlane.ts` — separate concern (interactive sessions) from plan orchestration (request/response API).
+- `NewPlanDialog.vue` follows the `CreateProjectDialog.vue` pattern — persistent Vuetify dialog, spawns PTY on open, kills on close, with error state handling and single WS reconnect retry.
+
 ## 2026-02-07 (desktop: project creation & bundled packs)
 - Bundled the guidance pack as a Tauri resource so the Packs tab shows `forge-guidance-pack` immediately on app startup without requiring a GitHub release download.
 - In dev mode, bundled packs resolve via `CARGO_MANIFEST_DIR` relative path to `packages/guidance-pack/src/assets/`; in production, via the Tauri resource directory (`bundled-packs/`).
