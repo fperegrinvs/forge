@@ -2,6 +2,14 @@
 
 Track repository-level technical decisions and rationale.
 
+## 2026-02-07 (desktop: project creation & bundled packs)
+- Bundled the guidance pack as a Tauri resource so the Packs tab shows `forge-guidance-pack` immediately on app startup without requiring a GitHub release download.
+- In dev mode, bundled packs resolve via `CARGO_MANIFEST_DIR` relative path to `packages/guidance-pack/src/assets/`; in production, via the Tauri resource directory (`bundled-packs/`).
+- Bundled packs merge with downloaded packs at runtime; downloaded versions take precedence over bundled ones with the same name.
+- Added native folder picker via the `rfd` crate exposed through `GET /api/dialog/select-folder`.
+- Added `GET /api/templates` (hardcoded forge-template for now) and `POST /api/project/init` (delegates to `forge init` CLI) for project creation from the desktop UI.
+- Offline-resilient: `packs_check_updates` returns empty gracefully when the GitHub releases index is unreachable.
+
 ## 2026-02-07 (single-port & workflow discipline)
 - Desktop app uses a Rust HTTP server embedded in Tauri (`http_server.rs`) to serve both static frontend assets and `/api/*` routes on a single port (1420), eliminating CORS and multi-origin issues.
 - Desktop UI communicates with the backend via HTTP `/api/*` on the same origin instead of Tauri `invoke()` commands, simplifying the frontend code.
