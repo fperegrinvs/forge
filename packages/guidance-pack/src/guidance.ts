@@ -9,7 +9,7 @@ import type { InstallGuidanceOptions, InstallGuidanceResult, SkillDescriptor } f
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const builtPackRoot = join(currentDir, "assets", "pack");
 const sourcePackRoot = join(currentDir, "..", "src", "assets", "pack");
-const packRoot = existsSync(builtPackRoot) ? builtPackRoot : sourcePackRoot;
+const bundledPackRoot = existsSync(builtPackRoot) ? builtPackRoot : sourcePackRoot;
 const policyFile = "workflow-policy.v1.json";
 
 function hashContent(value: string): string {
@@ -47,7 +47,8 @@ export async function discoverSkills(guidanceRoot: string): Promise<SkillDescrip
   return skills;
 }
 
-export async function installGuidance(
+export async function installGuidanceFromPackRoot(
+  packRoot: string,
   targetRoot: string,
   options: InstallGuidanceOptions = {}
 ): Promise<InstallGuidanceResult> {
@@ -91,11 +92,18 @@ export async function installGuidance(
 }
 
 export function getBundledGuidanceRoot(): string {
-  return packRoot;
+  return bundledPackRoot;
+}
+
+export async function installGuidance(
+  targetRoot: string,
+  options: InstallGuidanceOptions = {}
+): Promise<InstallGuidanceResult> {
+  return await installGuidanceFromPackRoot(bundledPackRoot, targetRoot, options);
 }
 
 export async function loadBundledManifest(): Promise<Record<string, unknown>> {
-  const manifestPath = join(packRoot, "manifest.json");
+  const manifestPath = join(bundledPackRoot, "manifest.json");
   const content = await readFile(manifestPath, "utf8");
   return JSON.parse(content) as Record<string, unknown>;
 }

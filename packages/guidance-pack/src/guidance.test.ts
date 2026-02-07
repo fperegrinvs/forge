@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   discoverSkills,
   getBundledGuidanceRoot,
   installGuidance,
+  installGuidanceFromPackRoot,
   loadBundledManifest,
   loadBundledWorkflowPolicy,
   resolveAgentsPrecedence
@@ -59,6 +60,29 @@ describe("guidance pack", () => {
 
     const withForce = await installGuidance(target, { forceReplace: true });
     expect(withForce.updated).toContain("manifest.json");
+  });
+
+  it("installs guidance from an explicit pack root", async () => {
+    // Given a minimal guidance pack on disk
+    const packRoot = await mkdtemp(join(tmpdir(), "forge-guidance-packroot-"));
+    await writeFile(
+      join(packRoot, "manifest.json"),
+      JSON.stringify({ name: "forge-guidance-pack", version: "9.9.9" }, null, 2),
+      "utf8"
+    );
+    await mkdir(join(packRoot, "rules"), { recursive: true });
+    await writeFile(join(packRoot, "rules", "example.md"), "from-pack\n", "utf8");
+
+    // And a target directory
+    const target = await mkdtemp(join(tmpdir(), "forge-guidance-target-"));
+
+    // When guidance is installed from the explicit pack root
+    const result = await installGuidanceFromPackRoot(packRoot, target);
+
+    // Then files are installed into the target root
+    expect(result.installed).toContain("manifest.json");
+    expect(result.installed).toContain("rules/example.md");
+    expect(await exists(join(target, "rules", "example.md"))).toBe(true);
   });
 
   it("loads bundled manifest", async () => {
