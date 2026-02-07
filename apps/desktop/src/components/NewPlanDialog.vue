@@ -1,14 +1,14 @@
 <template>
-  <v-dialog v-model="open" max-width="1000" persistent>
-    <v-card>
-      <v-card-title class="d-flex align-center">
+  <v-dialog v-model="open" :width="dialogWidth" :height="dialogHeight" persistent class="new-plan-dialog">
+    <v-card class="d-flex flex-column" style="height: 100%; overflow: hidden; resize: both;">
+      <v-card-title class="d-flex align-center flex-shrink-0">
         <span>New Plan</span>
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" size="small" @click="onClose" />
       </v-card-title>
-      <v-card-text>
-        <v-row>
-          <v-col cols="4">
+      <v-card-text class="flex-grow-1 d-flex" style="overflow: hidden; min-height: 0;">
+        <div class="d-flex flex-grow-1" style="min-height: 0;">
+          <div v-if="showInstructions" class="instructions-panel pa-3" style="width: 280px; min-width: 280px; overflow-y: auto;">
             <h3 class="text-subtitle-1 mb-2">Instructions</h3>
             <ol class="text-body-2">
               <li class="mb-2">
@@ -35,8 +35,17 @@
             <v-alert v-if="!sessionId && !error" type="info" variant="tonal" class="mt-3">
               Starting terminal...
             </v-alert>
-          </v-col>
-          <v-col cols="8">
+          </div>
+
+          <v-btn
+            :icon="showInstructions ? 'mdi-chevron-left' : 'mdi-chevron-right'"
+            variant="text"
+            size="x-small"
+            class="align-self-center flex-shrink-0"
+            @click="showInstructions = !showInstructions"
+          />
+
+          <div class="flex-grow-1" style="min-width: 0; min-height: 0;">
             <TerminalPanel
               v-if="sessionId"
               :session-id="sessionId"
@@ -50,10 +59,10 @@
             <div v-else class="d-flex align-center justify-center" style="min-height: 300px">
               <v-progress-circular indeterminate />
             </div>
-          </v-col>
-        </v-row>
+          </div>
+        </div>
       </v-card-text>
-      <v-card-actions>
+      <v-card-actions class="flex-shrink-0">
         <v-spacer />
         <v-btn variant="text" @click="onClose">Cancel</v-btn>
         <v-btn color="primary" @click="onDone">Done</v-btn>
@@ -81,6 +90,9 @@ const open = defineModel<boolean>({ default: false });
 
 const skillInstruction = computed(() => getSkillInvocation(props.adapter));
 
+const showInstructions = ref(true);
+const dialogWidth = ref(1000);
+const dialogHeight = ref(600);
 const sessionId = ref<string>("");
 const error = ref<string>("");
 
@@ -134,3 +146,14 @@ function onDone(): void {
   open.value = false;
 }
 </script>
+
+<style scoped>
+.new-plan-dialog :deep(.v-overlay__content) {
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.instructions-panel {
+  border-right: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+</style>
