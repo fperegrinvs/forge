@@ -2,6 +2,14 @@
 
 Track repository-level technical decisions and rationale.
 
+## 2026-02-07 (agent-native skill commands & dialog UX)
+- `installGuidance` now registers skills as agent-native commands: `.claude/commands/<name>.md` for Claude Code (YAML frontmatter stripped) and `.agents/skills/<name>/SKILL.md` for Codex (full content preserved). This lets both agents discover Forge skills as native slash commands without manual setup.
+- Added `stripFrontmatter` helper to remove YAML frontmatter blocks from SKILL.md files, since Claude Code commands don't use frontmatter.
+- `registerSkillCommands` is idempotent — identical files are skipped via SHA-1 hash comparison, matching the existing `installGuidanceFromPackRoot` pattern.
+- NewPlanDialog instruction text is now adapter-conditional: Claude users see `/plan-guided`, Codex users see `$plan-guided`, matching each agent's native command syntax.
+- NewPlanDialog instructions panel is collapsible via a chevron toggle, expanding the terminal to full dialog width when hidden.
+- NewPlanDialog is now resizable via CSS `resize: both` on the card, constrained to 90vw/90vh.
+
 ## 2026-02-07 (planning agent with embedded terminal)
 - Added `plan-guided` skill to the guidance pack — extends `plan-author` with enforced constraints for interactive plan creation: schema v2 compliance, BDD acceptance criteria required, 80% coverage targets, save to `plans/` directory.
 - Chose `portable-pty` (Rust crate) for cross-platform PTY spawning — supports macOS, Linux, and Windows without platform-specific code.
