@@ -379,26 +379,9 @@ async fn project_get_guidance_status(
     .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct InstalledPack {
-    name: String,
-    version: String,
-    path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PackUpdateStatus {
-    name: String,
-    installed_version: Option<String>,
-    latest_version: Option<String>,
-    has_update: bool,
-}
-
 async fn packs_list_installed(
     State(state): State<ServerState>,
-) -> Result<Json<Vec<InstalledPack>>, (StatusCode, String)> {
+) -> Result<Json<Vec<crate::packs::InstalledPack>>, (StatusCode, String)> {
     let app = state.app.clone();
     let bundled_dir = state.bundled_packs_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -413,17 +396,7 @@ async fn packs_list_installed(
             None => vec![],
         };
 
-        let merged = merge_bundled_packs(bundled, downloaded);
-        Ok::<_, String>(
-            merged
-                .into_iter()
-                .map(|p| InstalledPack {
-                    name: p.name,
-                    version: p.version,
-                    path: p.path,
-                })
-                .collect(),
-        )
+        Ok::<_, String>(merge_bundled_packs(bundled, downloaded))
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -433,7 +406,7 @@ async fn packs_list_installed(
 
 async fn packs_check_updates(
     State(state): State<ServerState>,
-) -> Result<Json<Vec<PackUpdateStatus>>, (StatusCode, String)> {
+) -> Result<Json<Vec<crate::packs::PackUpdateStatus>>, (StatusCode, String)> {
     let app = state.app.clone();
     let bundled_dir = state.bundled_packs_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -453,19 +426,7 @@ async fn packs_check_updates(
             None => vec![],
         };
         let installed = merge_bundled_packs(bundled, downloaded);
-        let statuses = compute_update_status(&index, &installed);
-
-        Ok::<_, String>(
-            statuses
-                .into_iter()
-                .map(|s| PackUpdateStatus {
-                    name: s.name,
-                    installed_version: s.installed_version,
-                    latest_version: s.latest_version,
-                    has_update: s.has_update,
-                })
-                .collect(),
-        )
+        Ok::<_, String>(compute_update_status(&index, &installed))
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -483,19 +444,14 @@ struct PacksDownloadRequest {
 async fn packs_download(
     State(state): State<ServerState>,
     Json(body): Json<PacksDownloadRequest>,
-) -> Result<Json<InstalledPack>, (StatusCode, String)> {
+) -> Result<Json<crate::packs::InstalledPack>, (StatusCode, String)> {
     let app = state.app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let app_data = app
             .path()
             .app_data_dir()
             .map_err(|error| format!("resolve app data dir: {error}"))?;
-        let installed = download_and_install_pack(&app_data, &body.pack_name, body.version.as_deref())?;
-        Ok::<_, String>(InstalledPack {
-            name: installed.name,
-            version: installed.version,
-            path: installed.path,
-        })
+        download_and_install_pack(&app_data, &body.pack_name, body.version.as_deref())
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
