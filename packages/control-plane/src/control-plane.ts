@@ -97,16 +97,14 @@ export class ForgeControlPlane {
     const state = await this.loadState(planPath, plan.tasks.map((task) => task.id));
 
     // Auto-resume: if paused, unlock state so the next task can proceed
-    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
-    if (pausedRun) {
-      if (pausedRun.taskId && state.tasks[pausedRun.taskId] === "paused") {
-        state.tasks[pausedRun.taskId] = "pending";
+    if (state.pausedRun) {
+      if (state.pausedRun.taskId && state.tasks[state.pausedRun.taskId] === "paused") {
+        state.tasks[state.pausedRun.taskId] = "pending";
       } else {
         const pausedTaskId = Object.entries(state.tasks).find(([, s]) => s === "paused")?.[0];
         if (pausedTaskId) state.tasks[pausedTaskId] = "pending";
       }
       delete state.pausedRun;
-      delete state.pausedRunId;
       await this.saveState(state);
     }
 
@@ -181,7 +179,6 @@ export class ForgeControlPlane {
         adapterType,
         ...(externalRunId ? { externalRunId } : {})
       };
-      state.pausedRunId = runId;
       await this.saveState(state);
       return {
         taskId: nextTask.id,
@@ -198,7 +195,6 @@ export class ForgeControlPlane {
 
     state.tasks[nextTask.id] = "completed";
     delete state.pausedRun;
-    delete state.pausedRunId;
     await this.saveState(state);
 
     return {
@@ -215,19 +211,17 @@ export class ForgeControlPlane {
   async pause(runId: string): Promise<void> {
     const state = await this.loadState("", []);
     state.pausedRun = { runId };
-    state.pausedRunId = runId;
     await this.saveState(state);
   }
 
   async resume(runId: string): Promise<boolean> {
     const state = await this.loadState("", []);
-    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
-    if (!pausedRun || pausedRun.runId !== runId) {
+    if (!state.pausedRun || state.pausedRun.runId !== runId) {
       return false;
     }
 
-    if (pausedRun.taskId && state.tasks[pausedRun.taskId] === "paused") {
-      state.tasks[pausedRun.taskId] = "pending";
+    if (state.pausedRun.taskId && state.tasks[state.pausedRun.taskId] === "paused") {
+      state.tasks[state.pausedRun.taskId] = "pending";
     } else {
       const pausedTaskId = Object.entries(state.tasks).find(([, taskState]) => taskState === "paused")?.[0];
       if (pausedTaskId) {
@@ -236,7 +230,6 @@ export class ForgeControlPlane {
     }
 
     delete state.pausedRun;
-    delete state.pausedRunId;
     await this.saveState(state);
     return true;
   }
@@ -271,16 +264,16 @@ export class ForgeControlPlane {
     }
 
     const raw = await readFile(this.statePath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<RuntimeState>;
+    const parsed = JSON.parse(raw) as Partial<RuntimeState> & { pausedRunId?: string };
     const existing: RuntimeState = {
       planPath: typeof parsed.planPath === "string" ? parsed.planPath : planPath,
       tasks: parsed.tasks ?? {},
-      ...(parsed.pausedRun ? { pausedRun: parsed.pausedRun } : {}),
-      ...(parsed.pausedRunId ? { pausedRunId: parsed.pausedRunId } : {})
+      ...(parsed.pausedRun ? { pausedRun: parsed.pausedRun } : {})
     };
 
-    if (!existing.pausedRun && existing.pausedRunId) {
-      existing.pausedRun = { runId: existing.pausedRunId };
+    // Migrate legacy pausedRunId field from old state files
+    if (!existing.pausedRun && parsed.pausedRunId) {
+      existing.pausedRun = { runId: parsed.pausedRunId };
     }
 
     for (const id of taskIds) {
