@@ -61,6 +61,58 @@ pub fn packs_root(app_data_dir: &Path) -> PathBuf {
   app_data_dir.join("packs")
 }
 
+/// Reads bundled packs from a directory where each subdirectory is a pack
+/// containing a manifest.json. Packs without a manifest are skipped.
+pub fn read_bundled_packs(bundled_dir: &Path) -> Result<Vec<InstalledPack>, String> {
+  if !bundled_dir.exists() {
+    return Ok(vec![]);
+  }
+
+  let mut packs = vec![];
+  let entries = fs::read_dir(bundled_dir).map_err(|error| format!("read bundled packs dir: {error}"))?;
+  for entry in entries {
+    let entry = entry.map_err(|error| format!("read bundled pack entry: {error}"))?;
+    if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+      continue;
+    }
+    let manifest_path = entry.path().join("manifest.json");
+    if !manifest_path.exists() {
+      continue;
+    }
+    let raw = fs::read_to_string(&manifest_path)
+      .map_err(|error| format!("read bundled manifest {:?}: {error}", manifest_path))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+      .map_err(|error| format!("parse bundled manifest {:?}: {error}", manifest_path))?;
+
+    let name = value.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let version = value.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0").to_string();
+    if name.is_empty() {
+      continue;
+    }
+    packs.push(InstalledPack {
+      name,
+      version,
+      path: entry.path().to_string_lossy().to_string(),
+    });
+  }
+  Ok(packs)
+}
+
+/// Merges bundled packs into a downloaded packs list.
+/// If a downloaded pack has the same name as a bundled pack, the downloaded version wins.
+pub fn merge_bundled_packs(bundled: Vec<InstalledPack>, downloaded: Vec<InstalledPack>) -> Vec<InstalledPack> {
+  let downloaded_names: std::collections::HashSet<String> =
+    downloaded.iter().map(|p| p.name.clone()).collect();
+
+  let mut merged = downloaded;
+  for pack in bundled {
+    if !downloaded_names.contains(&pack.name) {
+      merged.push(pack);
+    }
+  }
+  merged
+}
+
 fn parse_repo_env() -> (String, String) {
   // `owner/repo` (default is intentionally generic; override in dev/prod).
   let value = std::env::var("FORGE_DESKTOP_PACKS_REPO").unwrap_or_else(|_| "forge/forge".to_string());
@@ -603,6 +655,100 @@ mod tests {
     assert!(validate_archive_entry_path("../escape.txt").is_err());
     assert!(validate_archive_entry_path("a/../../escape.txt").is_err());
     assert!(validate_archive_entry_path("/etc/passwd").is_err());
+  }
+
+  #[test]
+  fn read_bundled_packs_returns_empty_when_dir_missing() {
+    // Given a non-existent bundled-packs directory
+    let dir = PathBuf::from("/tmp/forge-test-nonexistent-bundled-packs-dir");
+
+    // When bundled packs are read from a missing directory
+    let result = read_bundled_packs(&dir);
+
+    // Then an empty list is returned without error
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
+  }
+
+  #[test]
+  fn read_bundled_packs_reads_manifest_from_pack_dir() {
+    // Given a temporary directory containing a bundled pack with a manifest
+    let dir = PathBuf::from("/tmp/forge-test-bundled-packs-manifest");
+    let pack_dir = dir.join("forge-guidance-pack");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&pack_dir).unwrap();
+    fs::write(
+      pack_dir.join("manifest.json"),
+      r#"{"name":"forge-guidance-pack","version":"1.0.0"}"#,
+    )
+    .unwrap();
+
+    // When bundled packs are read
+    let result = read_bundled_packs(&dir);
+
+    // Then it returns an InstalledPack with correct name, version, and path
+    let packs = result.unwrap();
+    assert_eq!(packs.len(), 1);
+    assert_eq!(packs[0].name, "forge-guidance-pack");
+    assert_eq!(packs[0].version, "1.0.0");
+    assert_eq!(packs[0].path, pack_dir.to_string_lossy());
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn read_bundled_packs_skips_entries_without_manifest() {
+    // Given a directory with a subdirectory but no manifest.json
+    let dir = PathBuf::from("/tmp/forge-test-bundled-packs-no-manifest");
+    let pack_dir = dir.join("some-pack");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&pack_dir).unwrap();
+    fs::write(pack_dir.join("readme.txt"), "hello").unwrap();
+
+    // When bundled packs are read
+    let result = read_bundled_packs(&dir);
+
+    // Then the entry without a manifest is skipped
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn read_bundled_packs_dedup_with_downloaded() {
+    // Given a bundled pack and a downloaded pack with the same name
+    let bundled_dir = PathBuf::from("/tmp/forge-test-bundled-dedup");
+    let pack_dir = bundled_dir.join("forge-guidance-pack");
+    let _ = fs::remove_dir_all(&bundled_dir);
+    fs::create_dir_all(&pack_dir).unwrap();
+    fs::write(
+      pack_dir.join("manifest.json"),
+      r#"{"name":"forge-guidance-pack","version":"1.0.0"}"#,
+    )
+    .unwrap();
+
+    let bundled = read_bundled_packs(&bundled_dir).unwrap();
+    let downloaded = vec![InstalledPack {
+      name: "forge-guidance-pack".to_string(),
+      version: "2.0.0".to_string(),
+      path: "/downloaded/path".to_string(),
+    }];
+
+    // When bundled and downloaded packs are merged
+    let merged = merge_bundled_packs(bundled, downloaded.clone());
+
+    // Then the downloaded version takes precedence (bundled is not duplicated)
+    let guidance: Vec<&InstalledPack> = merged.iter().filter(|p| p.name == "forge-guidance-pack").collect();
+    assert_eq!(guidance.len(), 1, "no duplicates in merged list");
+    assert_eq!(guidance[0].version, "2.0.0", "downloaded version wins");
+
+    // And when no downloaded version exists, bundled is included
+    let merged_no_download = merge_bundled_packs(read_bundled_packs(&bundled_dir).unwrap(), vec![]);
+    assert_eq!(merged_no_download.len(), 1);
+    assert_eq!(merged_no_download[0].version, "1.0.0");
+
+    let _ = fs::remove_dir_all(&bundled_dir);
   }
 
   #[test]

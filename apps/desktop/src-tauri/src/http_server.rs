@@ -12,12 +12,33 @@ use tauri::Manager;
 use tower_http::services::ServeDir;
 
 use crate::forge_cli::run_forge_json;
-use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, read_installed_packs};
+use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs, read_bundled_packs, read_installed_packs};
 
 #[derive(Clone)]
 struct ServerState {
     app: AppHandle,
     frontend_dist: PathBuf,
+    bundled_packs_dir: Option<PathBuf>,
+}
+
+fn resolve_bundled_packs_dir(app: &AppHandle) -> Option<PathBuf> {
+    // Dev: the guidance pack source is at packages/guidance-pack/src/assets/pack/manifest.json.
+    // read_bundled_packs expects a dir whose subdirectories each contain manifest.json,
+    // so we return the assets/ dir (which contains the "pack" subdirectory).
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../packages/guidance-pack/src/assets");
+    if dev.join("pack").join("manifest.json").exists() {
+        return Some(dev);
+    }
+
+    // Prod: check Tauri resource directory for bundled-packs/ (mapped in tauri.conf.json).
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("bundled-packs");
+        if bundled.exists() {
+            return Some(bundled);
+        }
+    }
+
+    None
 }
 
 fn resolve_frontend_dist_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -358,43 +379,24 @@ async fn project_get_guidance_status(
     .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct InstalledPack {
-    name: String,
-    version: String,
-    path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PackUpdateStatus {
-    name: String,
-    installed_version: Option<String>,
-    latest_version: Option<String>,
-    has_update: bool,
-}
-
 async fn packs_list_installed(
     State(state): State<ServerState>,
-) -> Result<Json<Vec<InstalledPack>>, (StatusCode, String)> {
+) -> Result<Json<Vec<crate::packs::InstalledPack>>, (StatusCode, String)> {
     let app = state.app.clone();
+    let bundled_dir = state.bundled_packs_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let app_data = app
             .path()
             .app_data_dir()
             .map_err(|error| format!("resolve app data dir: {error}"))?;
-        let installed = read_installed_packs(&app_data)?;
-        Ok::<_, String>(
-            installed
-                .into_iter()
-                .map(|p| InstalledPack {
-                    name: p.name,
-                    version: p.version,
-                    path: p.path,
-                })
-                .collect(),
-        )
+        let downloaded = read_installed_packs(&app_data)?;
+
+        let bundled = match bundled_dir {
+            Some(dir) => read_bundled_packs(&dir).unwrap_or_default(),
+            None => vec![],
+        };
+
+        Ok::<_, String>(merge_bundled_packs(bundled, downloaded))
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -404,29 +406,27 @@ async fn packs_list_installed(
 
 async fn packs_check_updates(
     State(state): State<ServerState>,
-) -> Result<Json<Vec<PackUpdateStatus>>, (StatusCode, String)> {
+) -> Result<Json<Vec<crate::packs::PackUpdateStatus>>, (StatusCode, String)> {
     let app = state.app.clone();
+    let bundled_dir = state.bundled_packs_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let index = fetch_packs_index()?;
+        // Fetch remote index; if offline, return empty update statuses gracefully.
+        let index = match fetch_packs_index() {
+            Ok(idx) => idx,
+            Err(_) => return Ok::<_, String>(vec![]),
+        };
 
         let app_data = app
             .path()
             .app_data_dir()
             .map_err(|error| format!("resolve app data dir: {error}"))?;
-        let installed = read_installed_packs(&app_data)?;
-        let statuses = compute_update_status(&index, &installed);
-
-        Ok::<_, String>(
-            statuses
-                .into_iter()
-                .map(|s| PackUpdateStatus {
-                    name: s.name,
-                    installed_version: s.installed_version,
-                    latest_version: s.latest_version,
-                    has_update: s.has_update,
-                })
-                .collect(),
-        )
+        let downloaded = read_installed_packs(&app_data)?;
+        let bundled = match bundled_dir {
+            Some(dir) => read_bundled_packs(&dir).unwrap_or_default(),
+            None => vec![],
+        };
+        let installed = merge_bundled_packs(bundled, downloaded);
+        Ok::<_, String>(compute_update_status(&index, &installed))
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -444,19 +444,14 @@ struct PacksDownloadRequest {
 async fn packs_download(
     State(state): State<ServerState>,
     Json(body): Json<PacksDownloadRequest>,
-) -> Result<Json<InstalledPack>, (StatusCode, String)> {
+) -> Result<Json<crate::packs::InstalledPack>, (StatusCode, String)> {
     let app = state.app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let app_data = app
             .path()
             .app_data_dir()
             .map_err(|error| format!("resolve app data dir: {error}"))?;
-        let installed = download_and_install_pack(&app_data, &body.pack_name, body.version.as_deref())?;
-        Ok::<_, String>(InstalledPack {
-            name: installed.name,
-            version: installed.version,
-            path: installed.path,
-        })
+        download_and_install_pack(&app_data, &body.pack_name, body.version.as_deref())
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -496,6 +491,101 @@ async fn project_install_guidance(
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
     .map(Json)
     .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectTemplate {
+    id: String,
+    name: String,
+    description: String,
+}
+
+async fn list_templates() -> Json<Vec<ProjectTemplate>> {
+    Json(vec![ProjectTemplate {
+        id: "forge-template".to_string(),
+        name: "Forge Template".to_string(),
+        description: "Default project template with spec-driven workflow".to_string(),
+    }])
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectInitRequest {
+    parent_dir: String,
+    project_name: String,
+    template: Option<String>,
+    #[serde(default)]
+    skip_guidance: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectInitResult {
+    success: bool,
+    project_root: Option<String>,
+    message: Option<String>,
+}
+
+async fn project_init(
+    State(state): State<ServerState>,
+    Json(body): Json<ProjectInitRequest>,
+) -> Result<Json<ProjectInitResult>, (StatusCode, String)> {
+    let app = state.app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let project_root = PathBuf::from(&body.parent_dir).join(&body.project_name);
+        let cwd = PathBuf::from(&body.parent_dir);
+        let mut args = vec![
+            "init".to_string(),
+            body.project_name.clone(),
+            "--json".to_string(),
+        ];
+        if let Some(ref template) = body.template {
+            args.push("--template".to_string());
+            args.push(template.clone());
+        }
+        if body.skip_guidance {
+            args.push("--skip-guidance".to_string());
+        }
+
+        match run_forge_json(&app, &cwd, &args) {
+            Ok(_) => Ok::<_, String>(ProjectInitResult {
+                success: true,
+                project_root: Some(project_root.to_string_lossy().to_string()),
+                message: None,
+            }),
+            Err(error) => Ok(ProjectInitResult {
+                success: false,
+                project_root: None,
+                message: Some(error),
+            }),
+        }
+    })
+    .await
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
+    .map(Json)
+    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectFolderResult {
+    path: Option<String>,
+}
+
+async fn select_folder() -> Json<SelectFolderResult> {
+    let result = tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("Select Project Folder")
+            .pick_folder()
+    })
+    .await
+    .ok()
+    .flatten();
+
+    Json(SelectFolderResult {
+        path: result.map(|p| p.to_string_lossy().to_string()),
+    })
 }
 
 async fn pause_run(Json(_body): Json<serde_json::Value>) -> impl IntoResponse {
@@ -547,9 +637,12 @@ async fn debug_status(State(state): State<ServerState>) -> Json<DebugStatus> {
 pub async fn serve(app: AppHandle) -> Result<(), String> {
     let frontend_dist = resolve_frontend_dist_dir(&app)?;
 
+    let bundled_packs_dir = resolve_bundled_packs_dir(&app);
+
     let state = ServerState {
         app,
         frontend_dist: frontend_dist.clone(),
+        bundled_packs_dir,
     };
     let api = Router::new()
         .route("/api/debug/status", get(debug_status))
@@ -563,6 +656,9 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/packs/updates", get(packs_check_updates))
         .route("/api/packs/download", post(packs_download))
         .route("/api/project/install-guidance", post(project_install_guidance))
+        .route("/api/templates", get(list_templates))
+        .route("/api/project/init", post(project_init))
+        .route("/api/dialog/select-folder", get(select_folder))
         .with_state(state.clone());
 
     let assets_dir = frontend_dist.join("assets");

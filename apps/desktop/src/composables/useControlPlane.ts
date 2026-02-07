@@ -123,6 +123,41 @@ export async function projectInstallGuidance(
   });
 }
 
+export type ProjectTemplate = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type ProjectInitRequest = {
+  parentDir: string;
+  projectName: string;
+  template?: string;
+  skipGuidance?: boolean;
+};
+
+export type ProjectInitResult = {
+  success: boolean;
+  projectRoot?: string;
+  message?: string;
+};
+
+export async function listTemplates(): Promise<ProjectTemplate[]> {
+  return await apiJson<ProjectTemplate[]>("/api/templates", { method: "GET" });
+}
+
+export async function projectInit(request: ProjectInitRequest): Promise<ProjectInitResult> {
+  return await apiJson<ProjectInitResult>("/api/project/init", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export async function selectFolder(): Promise<string | null> {
+  const result = await apiJson<{ path: string | null }>("/api/dialog/select-folder", { method: "GET" });
+  return result.path;
+}
+
 export async function pauseRun(runId: string): Promise<boolean> {
   return await apiJson<boolean>("/api/run/pause", {
     method: "POST",
