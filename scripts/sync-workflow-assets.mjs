@@ -50,6 +50,10 @@ function renderAgents(policy) {
     gateLines.push(`- gate:architecture -> ${gateCommands.architecture}`);
   }
 
+  if (gateCommands.coverage) {
+    gateLines.push(`- gate:coverage -> ${gateCommands.coverage}`);
+  }
+
   gateLines.push(
     `- gate:docs -> ${gateCommands.docs}`,
     `- gate:commit -> ${gateCommands.commit}`,
@@ -104,6 +108,24 @@ function renderTestingRule(policy) {
 
   gateLines.push(`Run gate:refactor with: ${gateCommands.refactor}`);
 
+  const thresholds = policy.quality.coverage_thresholds;
+  const coverageSection =
+    thresholds && gateCommands.coverage
+      ? [
+          "## Coverage",
+          "",
+          "Coverage is required and enforced in CI.",
+          `Run gate:coverage with: ${gateCommands.coverage}`,
+          "",
+          "Minimum thresholds:",
+          `- lines: ${String(thresholds.lines)}%`,
+          `- statements: ${String(thresholds.statements)}%`,
+          `- functions: ${String(thresholds.functions)}%`,
+          `- branches: ${String(thresholds.branches)}%`,
+          ""
+        ]
+      : [];
+
   return [
     "# Testing Rules",
     "",
@@ -121,6 +143,7 @@ function renderTestingRule(policy) {
     "Adapter-boundary reason is allowed only in:",
     boundaryGlobs,
     ...gateLines,
+    ...(coverageSection.length > 0 ? ["", ...coverageSection] : []),
     ""
   ].join("\n");
 }

@@ -19,3 +19,8 @@ verify:
     - if [ -f bun.lockb ]; then bun install --frozen-lockfile; else bun install; fi
     - ./scripts/bootstrap-toolchain.sh --check
     - bun run verify
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - coverage/

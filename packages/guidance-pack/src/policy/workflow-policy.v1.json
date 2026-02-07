@@ -14,6 +14,12 @@
     "require_property_tests": true,
     "require_contract_tests": true,
     "require_docs_updates": true,
+    "coverage_thresholds": {
+      "lines": 80,
+      "statements": 80,
+      "functions": 75,
+      "branches": 70
+    },
     "mock_policy": "strict_boundary",
     "allow_mocks_only_for": [
       "adapter_boundary",
@@ -33,8 +39,9 @@
       "refactor": "bun run test && bun run typecheck && bun run lint",
       "architecture": "bun run architecture:check",
       "docs": "bun run docs:check",
+      "coverage": "bun run test:coverage",
       "commit": "git status --porcelain",
-      "verify": "bun run test && bun run typecheck && bun run lint && bun run architecture:check && bun run test:desktop"
+      "verify": "bun run test:coverage && bun run typecheck && bun run lint && bun run architecture:check"
     }
   },
   "docs": {

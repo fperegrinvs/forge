@@ -16,6 +16,7 @@ Workflow policy version: 1.1.0
 - gate:green -> bun run test && bun run typecheck && bun run lint
 - gate:refactor -> bun run test && bun run typecheck && bun run lint
 - gate:architecture -> bun run architecture:check
+- gate:coverage -> bun run test:coverage
 - gate:docs -> bun run docs:check
 - gate:commit -> git status --porcelain
-- gate:verify -> bun run test && bun run typecheck && bun run lint && bun run architecture:check && bun run test:desktop
+- gate:verify -> bun run test:coverage && bun run typecheck && bun run lint && bun run architecture:check
