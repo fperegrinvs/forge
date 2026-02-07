@@ -5,12 +5,16 @@
         <div class="d-flex align-center mb-4">
           <h1 class="text-h4">Forge Desktop</h1>
           <v-spacer />
+          <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" class="mr-2" @click="showNewPlan = true">
+            New Plan
+          </v-btn>
           <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateProject = true">
             New Project
           </v-btn>
         </div>
 
         <CreateProjectDialog v-model="showCreateProject" @created="onProjectCreated" />
+        <NewPlanDialog v-model="showNewPlan" :project-root="projectRoot" :adapter="adapter" @plan-created="onPlanCreated" />
 
         <v-tabs v-model="tab" class="mb-4">
           <v-tab value="orchestrate">Orchestrate</v-tab>
@@ -153,6 +157,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
 import CreateProjectDialog from "./components/CreateProjectDialog.vue";
+import NewPlanDialog from "./components/NewPlanDialog.vue";
 import PlanGraph from "./components/PlanGraph.vue";
 import {
   getEvidence,
@@ -171,6 +176,7 @@ import {
 
 const tab = ref<"orchestrate" | "packs">("orchestrate");
 const showCreateProject = ref(false);
+const showNewPlan = ref(false);
 const adapter = ref<"codex" | "claude">("codex");
 const projectRoot = ref(".");
 const planPath = ref("./plan.json");
@@ -214,6 +220,10 @@ function onProjectCreated(newProjectRoot: string): void {
   projectRoot.value = newProjectRoot;
   tab.value = "orchestrate";
   logs.value.unshift(`Project created: ${newProjectRoot}`);
+}
+
+function onPlanCreated(): void {
+  logs.value.unshift("Plan created via guided flow — validate to load");
 }
 
 async function onValidate(): Promise<void> {
