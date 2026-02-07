@@ -1,10 +1,10 @@
-import { cp, mkdir, readdir, readFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { exists, listFilesRecursive } from "@forge/shared-utils";
-import type { InstallGuidanceOptions, InstallGuidanceResult, SkillDescriptor } from "./types.js";
+import type { InstallGuidanceOptions, InstallGuidanceResult, RegisteredCommands, SkillDescriptor } from "./types.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const builtPackRoot = join(currentDir, "assets", "pack");
@@ -87,6 +87,94 @@ export async function installGuidanceFromPackRoot(
       result.updated.push(rel);
     } else {
       result.skipped.push(rel);
+    }
+  }
+
+  // Register skills as agent-native commands
+  const skillsDir = join(packRoot, "skills");
+  const registered = await registerSkillCommands(skillsDir, targetRoot);
+  for (const name of registered.claude) {
+    result.installed.push(join(".claude", "commands", `${name}.md`));
+  }
+  for (const name of registered.codex) {
+    result.installed.push(join(".agents", "skills", name, "SKILL.md"));
+  }
+
+  return result;
+}
+
+export function stripFrontmatter(content: string): string {
+  if (!content.startsWith("---")) {
+    return content;
+  }
+  const endIndex = content.indexOf("\n---", 3);
+  if (endIndex === -1) {
+    return content;
+  }
+  // Skip past the closing "---" line and any leading blank lines
+  const afterFrontmatter = content.slice(endIndex + 4);
+  return afterFrontmatter.replace(/^\n+/, "");
+}
+
+export async function registerSkillCommands(
+  skillsDir: string,
+  targetRoot: string
+): Promise<RegisteredCommands> {
+  const result: RegisteredCommands = { claude: [], codex: [] };
+
+  if (!(await exists(skillsDir))) {
+    return result;
+  }
+
+  const entries = await readdir(skillsDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const skillMdPath = join(skillsDir, entry.name, "SKILL.md");
+    if (!(await exists(skillMdPath))) {
+      continue;
+    }
+
+    const content = await readFile(skillMdPath, "utf8");
+    const contentBytes = Buffer.from(content, "utf8");
+    const strippedContent = stripFrontmatter(content);
+    const strippedBytes = Buffer.from(strippedContent, "utf8");
+
+    // Claude Code: .claude/commands/<name>.md (frontmatter stripped)
+    const claudeDir = join(targetRoot, ".claude", "commands");
+    const claudePath = join(claudeDir, `${entry.name}.md`);
+    await mkdir(claudeDir, { recursive: true });
+
+    let claudeChanged = true;
+    if (await exists(claudePath)) {
+      const existing = await readFile(claudePath);
+      if (hashBytes(existing) === hashBytes(strippedBytes)) {
+        claudeChanged = false;
+      }
+    }
+    if (claudeChanged) {
+      await writeFile(claudePath, strippedContent, "utf8");
+      result.claude.push(entry.name);
+    }
+
+    // Codex: .agents/skills/<name>/SKILL.md (full content preserved)
+    const codexDir = join(targetRoot, ".agents", "skills", entry.name);
+    const codexPath = join(codexDir, "SKILL.md");
+    await mkdir(codexDir, { recursive: true });
+
+    let codexChanged = true;
+    if (await exists(codexPath)) {
+      const existing = await readFile(codexPath);
+      if (hashBytes(existing) === hashBytes(contentBytes)) {
+        codexChanged = false;
+      }
+    }
+    if (codexChanged) {
+      await writeFile(codexPath, content, "utf8");
+      result.codex.push(entry.name);
     }
   }
 

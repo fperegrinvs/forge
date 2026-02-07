@@ -15,7 +15,7 @@
                 The terminal on the right is running <strong>{{ adapter }}</strong>.
               </li>
               <li class="mb-2">
-                Type <code>/plan-guided</code> and press Enter to start guided plan creation.
+                {{ skillInstruction }} to start guided plan creation.
               </li>
               <li class="mb-2">
                 Describe the feature you want to build when prompted.
@@ -63,9 +63,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
+import { getSkillInvocation } from "./planDialogInstructions";
 
 const props = defineProps<{
   projectRoot: string;
@@ -77,6 +78,8 @@ const emit = defineEmits<{
 }>();
 
 const open = defineModel<boolean>({ default: false });
+
+const skillInstruction = computed(() => getSkillInvocation(props.adapter));
 
 const sessionId = ref<string>("");
 const error = ref<string>("");
