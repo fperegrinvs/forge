@@ -45,6 +45,13 @@ else
     ./node_modules/.bin/vite build --watch &
   fi
 fi
+
+if [[ "$ONESHOT" == "1" ]]; then
+  if [[ ! -f "$ROOT/apps/desktop/dist/index.html" ]]; then
+    echo "error: expected $ROOT/apps/desktop/dist/index.html to exist after build" >&2
+    exit 1
+  fi
+fi
 if [[ "$ONESHOT" != "1" ]]; then
   WATCH_PID="$!"
   trap 'kill "$WATCH_PID" 2>/dev/null || true' EXIT
@@ -53,6 +60,12 @@ fi
 cd "$ROOT/apps/desktop/src-tauri"
 if [[ "$ONESHOT" == "1" ]]; then
   # Strip the flag so cargo/tauri doesn't see it.
-  set -- "${@/--oneshot/}"
+  FILTERED=()
+  for arg in "$@"; do
+    if [[ "$arg" != "--oneshot" ]]; then
+      FILTERED+=("$arg")
+    fi
+  done
+  set -- "${FILTERED[@]}"
 fi
 exec cargo tauri dev "$@"

@@ -23,6 +23,12 @@ struct ServerState {
 fn resolve_frontend_dist_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(value) = std::env::var("FORGE_DESKTOP_FRONTEND_DIST") {
         let path = PathBuf::from(value);
+        if !path.join("index.html").exists() {
+            return Err(format!(
+                "FORGE_DESKTOP_FRONTEND_DIST is set but index.html is missing at {}",
+                path.to_string_lossy()
+            ));
+        }
         return Ok(path);
     }
 
@@ -509,10 +515,33 @@ async fn spa_index(State(state): State<ServerState>) -> impl IntoResponse {
         Err(_) => (
             StatusCode::OK,
             [("content-type", "text/html; charset=utf-8")],
-            r#"<!doctype html><html><head><meta charset="utf-8"><title>Forge Desktop</title></head><body><h1>Forge Desktop</h1><p>Frontend not built yet.</p><p>Run <code>bun run dev:singleport</code> in <code>apps/desktop</code>, or build once with <code>bun run build</code>.</p></body></html>"#,
+            format!(
+                "<!doctype html><html><head><meta charset=\"utf-8\"><title>Forge Desktop</title></head><body><h1>Forge Desktop</h1><p>Frontend not built (index.html missing).</p><p><strong>Resolved dist:</strong> <code>{}</code></p><p>Run <code>bun run dev:singleport</code> in <code>apps/desktop</code>, or build once with <code>bun run --filter @forge/desktop build</code>.</p></body></html>",
+                state.frontend_dist.to_string_lossy()
+            ),
         )
             .into_response(),
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DebugStatus {
+    port: u16,
+    frontend_dist: String,
+    index_exists: bool,
+    assets_dir_exists: bool,
+}
+
+async fn debug_status(State(state): State<ServerState>) -> Json<DebugStatus> {
+    let index_exists = state.frontend_dist.join("index.html").exists();
+    let assets_dir_exists = state.frontend_dist.join("assets").is_dir();
+    Json(DebugStatus {
+        port: port(),
+        frontend_dist: state.frontend_dist.to_string_lossy().to_string(),
+        index_exists,
+        assets_dir_exists,
+    })
 }
 
 pub async fn serve(app: AppHandle) -> Result<(), String> {
@@ -523,6 +552,7 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         frontend_dist: frontend_dist.clone(),
     };
     let api = Router::new()
+        .route("/api/debug/status", get(debug_status))
         .route("/api/plan/validate", post(plan_validate))
         .route("/api/run/next", post(run_next))
         .route("/api/run/resume", post(resume_run))
