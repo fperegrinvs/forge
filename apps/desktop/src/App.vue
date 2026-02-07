@@ -28,8 +28,8 @@
                   <v-select v-model="adapter" :items="['codex', 'claude']" label="Adapter" density="comfortable" />
 
                   <div class="d-flex flex-wrap ga-2">
-                    <v-btn color="primary" @click="onValidate">Validate Plan</v-btn>
                     <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" @click="showNewPlan = true">New Plan</v-btn>
+                    <v-btn color="primary" @click="onValidate">Validate Plan</v-btn>
                     <v-btn color="primary" variant="outlined" @click="onRunNext">Run Next</v-btn>
                     <v-btn color="success" variant="outlined" @click="onResume">Resume</v-btn>
                     <v-btn color="secondary" variant="outlined" @click="onOpenEvidence">Open Evidence</v-btn>
