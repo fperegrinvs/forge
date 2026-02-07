@@ -537,6 +537,101 @@ async fn project_install_guidance(
     .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectTemplate {
+    id: String,
+    name: String,
+    description: String,
+}
+
+async fn list_templates() -> Json<Vec<ProjectTemplate>> {
+    Json(vec![ProjectTemplate {
+        id: "forge-template".to_string(),
+        name: "Forge Template".to_string(),
+        description: "Default project template with spec-driven workflow".to_string(),
+    }])
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectInitRequest {
+    parent_dir: String,
+    project_name: String,
+    template: Option<String>,
+    #[serde(default)]
+    skip_guidance: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectInitResult {
+    success: bool,
+    project_root: Option<String>,
+    message: Option<String>,
+}
+
+async fn project_init(
+    State(state): State<ServerState>,
+    Json(body): Json<ProjectInitRequest>,
+) -> Result<Json<ProjectInitResult>, (StatusCode, String)> {
+    let app = state.app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let project_root = PathBuf::from(&body.parent_dir).join(&body.project_name);
+        let cwd = PathBuf::from(&body.parent_dir);
+        let mut args = vec![
+            "init".to_string(),
+            body.project_name.clone(),
+            "--json".to_string(),
+        ];
+        if let Some(ref template) = body.template {
+            args.push("--template".to_string());
+            args.push(template.clone());
+        }
+        if body.skip_guidance {
+            args.push("--skip-guidance".to_string());
+        }
+
+        match run_forge_json(&app, &cwd, &args) {
+            Ok(_) => Ok::<_, String>(ProjectInitResult {
+                success: true,
+                project_root: Some(project_root.to_string_lossy().to_string()),
+                message: None,
+            }),
+            Err(error) => Ok(ProjectInitResult {
+                success: false,
+                project_root: None,
+                message: Some(error),
+            }),
+        }
+    })
+    .await
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
+    .map(Json)
+    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectFolderResult {
+    path: Option<String>,
+}
+
+async fn select_folder() -> Json<SelectFolderResult> {
+    let result = tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("Select Project Folder")
+            .pick_folder()
+    })
+    .await
+    .ok()
+    .flatten();
+
+    Json(SelectFolderResult {
+        path: result.map(|p| p.to_string_lossy().to_string()),
+    })
+}
+
 async fn pause_run(Json(_body): Json<serde_json::Value>) -> impl IntoResponse {
     // v1: pause is filesystem-mediated via the control-plane state; CLI pause isn't exposed yet.
     Json(true)
@@ -605,6 +700,9 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/packs/updates", get(packs_check_updates))
         .route("/api/packs/download", post(packs_download))
         .route("/api/project/install-guidance", post(project_install_guidance))
+        .route("/api/templates", get(list_templates))
+        .route("/api/project/init", post(project_init))
+        .route("/api/dialog/select-folder", get(select_folder))
         .with_state(state.clone());
 
     let assets_dir = frontend_dist.join("assets");

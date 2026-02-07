@@ -2,7 +2,15 @@
   <v-app>
     <v-main>
       <v-container class="py-6">
-        <h1 class="text-h4 mb-4">Forge Desktop</h1>
+        <div class="d-flex align-center mb-4">
+          <h1 class="text-h4">Forge Desktop</h1>
+          <v-spacer />
+          <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateProject = true">
+            New Project
+          </v-btn>
+        </div>
+
+        <CreateProjectDialog v-model="showCreateProject" @created="onProjectCreated" />
 
         <v-tabs v-model="tab" class="mb-4">
           <v-tab value="orchestrate">Orchestrate</v-tab>
@@ -144,6 +152,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import CreateProjectDialog from "./components/CreateProjectDialog.vue";
 import PlanGraph from "./components/PlanGraph.vue";
 import {
   getEvidence,
@@ -161,6 +170,7 @@ import {
 } from "./composables/useControlPlane";
 
 const tab = ref<"orchestrate" | "packs">("orchestrate");
+const showCreateProject = ref(false);
 const adapter = ref<"codex" | "claude">("codex");
 const projectRoot = ref(".");
 const planPath = ref("./plan.json");
@@ -199,6 +209,12 @@ onMounted(async () => {
     packLogs.value.unshift(`Startup pack load error: ${String(error)}`);
   }
 });
+
+function onProjectCreated(newProjectRoot: string): void {
+  projectRoot.value = newProjectRoot;
+  tab.value = "orchestrate";
+  logs.value.unshift(`Project created: ${newProjectRoot}`);
+}
 
 async function onValidate(): Promise<void> {
   try {
