@@ -1,0 +1,9 @@
+{
+  "name": "forge-app-template",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'configure app dev scripts'",
+    "test": "echo 'configure app tests'"
+  }
+}

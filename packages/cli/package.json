@@ -1,0 +1,23 @@
+{
+  "name": "@forge/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "forge": "dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@forge/contracts": "0.1.0",
+    "@forge/control-plane": "0.1.0",
+    "@forge/guidance-pack": "0.1.0",
+    "@forge/shared-utils": "0.1.0",
+    "@forge/templates": "0.1.0",
+    "commander": "^13.1.0"
+  }
+}

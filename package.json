@@ -1,0 +1,31 @@
+{
+  "name": "forge-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "preflight": "./scripts/bootstrap-toolchain.sh --check",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:desktop": "vitest run apps/desktop/src/**/*.test.ts",
+    "verify": "npm run typecheck && npm run lint && npm run test",
+    "dev:desktop": "npm --workspace @forge/desktop run dev",
+    "docs:check": "node scripts/docs-check.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.22.0",
+    "eslint-plugin-import": "^2.31.0",
+    "jiti": "^2.6.1",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.25.0",
+    "vitest": "^3.0.8"
+  }
+}

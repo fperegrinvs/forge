@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+    branches: ["main", "codex/**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install
+        run: npm install
+      - name: Toolchain preflight
+        run: ./scripts/bootstrap-toolchain.sh --check
+      - name: Verify
+        run: npm run verify
