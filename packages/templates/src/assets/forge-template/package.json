@@ -2,6 +2,7 @@
   "name": "forge-app-template",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.3.8",
   "scripts": {
     "dev": "echo 'configure app dev scripts'",
     "test": "echo 'configure app tests'",
@@ -9,9 +10,9 @@
     "lint": "echo 'configure lint rules'",
     "docs:check": "node scripts/docs-check.mjs",
     "architecture:check": "node scripts/architecture-check.mjs",
-    "gate:green": "npm run test && npm run typecheck && npm run lint",
-    "gate:architecture": "npm run architecture:check",
-    "gate:docs": "npm run docs:check",
-    "workflow:check": "npm run gate:green && npm run gate:architecture && npm run gate:docs"
+    "gate:green": "bun run test && bun run typecheck && bun run lint",
+    "gate:architecture": "bun run architecture:check",
+    "gate:docs": "bun run docs:check",
+    "workflow:check": "bun run gate:green && bun run gate:architecture && bun run gate:docs"
   }
 }

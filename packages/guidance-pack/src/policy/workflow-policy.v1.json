@@ -28,13 +28,13 @@
   },
   "commands": {
     "gates": {
-      "spec": "npm run typecheck && npm run test -- --runInBand --passWithNoTests=false",
-      "green": "npm run test && npm run typecheck && npm run lint",
-      "refactor": "npm run test && npm run typecheck && npm run lint",
-      "architecture": "npm run architecture:check",
-      "docs": "npm run docs:check",
+      "spec": "bun run typecheck && bun run test",
+      "green": "bun run test && bun run typecheck && bun run lint",
+      "refactor": "bun run test && bun run typecheck && bun run lint",
+      "architecture": "bun run architecture:check",
+      "docs": "bun run docs:check",
       "commit": "git status --porcelain",
-      "verify": "npm run test && npm run typecheck && npm run lint && npm run architecture:check && npm run test:desktop"
+      "verify": "bun run test && bun run typecheck && bun run lint && bun run architecture:check && bun run test:desktop"
     }
   },
   "docs": {

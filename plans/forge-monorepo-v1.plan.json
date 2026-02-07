@@ -39,7 +39,7 @@
         "Workflow assets are generated from policy",
         "Drift check fails when generated files are stale"
       ],
-      "verification_command": "npm run workflow:check-sync",
+      "verification_command": "bun run workflow:check-sync",
       "tests": {
         "bdd_scenarios": [
           "Given policy definitions, when sync runs, then guidance and check assets match policy"
@@ -74,7 +74,7 @@
         "Legacy plans fail validation with migration guidance",
         "migratePlanToCurrentSpec outputs v2-compliant plan"
       ],
-      "verification_command": "npm --workspace @forge/contracts run test",
+      "verification_command": "bun run --filter @forge/contracts test",
       "tests": {
         "bdd_scenarios": [
           "Given a v1 plan, when migrate command runs, then output validates against v2 schema"
@@ -109,7 +109,7 @@
         "workflow check command fails missing tests/docs updates",
         "verify and CI both execute workflow enforcement"
       ],
-      "verification_command": "npm run workflow:check",
+      "verification_command": "bun run workflow:check",
       "tests": {
         "bdd_scenarios": [
           "Given source changes without tests or docs, when workflow check runs, then it fails"
