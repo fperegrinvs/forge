@@ -35,6 +35,30 @@
             <v-alert v-if="!sessionId && !error" type="info" variant="tonal" class="mt-3">
               Starting terminal...
             </v-alert>
+
+            <v-alert v-for="plan in newPlans" :key="plan.filename" :type="plan.valid === false ? 'error' : 'success'" variant="tonal" class="mt-3">
+              <div class="d-flex align-center">
+                <span>Plan detected: <strong>{{ plan.filename }}</strong></span>
+                <v-chip
+                  class="ml-2"
+                  size="small"
+                  :color="plan.validating ? 'grey' : plan.valid === true ? 'success' : plan.valid === false ? 'error' : 'grey'"
+                  :prepend-icon="plan.validating ? 'mdi-loading mdi-spin' : plan.valid === true ? 'mdi-check-circle' : plan.valid === false ? 'mdi-close-circle' : 'mdi-help-circle'"
+                  variant="tonal"
+                >
+                  {{ plan.validating ? 'Validating' : plan.valid === true ? 'Valid' : plan.valid === false ? 'Invalid' : 'Unknown' }}
+                </v-chip>
+              </div>
+              <v-list v-if="plan.valid === false && plan.issues.length" density="compact" class="mt-2">
+                <v-list-item
+                  v-for="(issue, idx) in plan.issues"
+                  :key="idx"
+                  prepend-icon="mdi-alert-circle-outline"
+                  :title="issue.message"
+                  :subtitle="`${issue.path} (${issue.code})`"
+                />
+              </v-list>
+            </v-alert>
           </div>
 
           <v-btn
@@ -65,6 +89,7 @@
       <v-card-actions class="flex-shrink-0">
         <v-spacer />
         <v-btn variant="text" @click="onClose">Cancel</v-btn>
+        <v-btn v-if="newPlans.length" color="success" @click="onUsePlan(newPlans[newPlans.length - 1])">Use Plan</v-btn>
         <v-btn color="primary" @click="onDone">Done</v-btn>
       </v-card-actions>
     </v-card>
@@ -77,13 +102,23 @@ import TerminalPanel from "./TerminalPanel.vue";
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
 import { getSkillInvocation } from "./planDialogInstructions";
 
+interface DiscoveredPlan {
+  filename: string;
+  path: string;
+  valid: boolean | null;
+  validating: boolean;
+  taskStatuses: unknown[];
+  issues: Array<{ path: string; message: string; code: string }>;
+}
+
 const props = defineProps<{
   projectRoot: string;
   adapter: string;
+  discoveredPlans: DiscoveredPlan[];
 }>();
 
 const emit = defineEmits<{
-  planCreated: [];
+  planCreated: [planPath?: string];
 }>();
 
 const open = defineModel<boolean>({ default: false });
@@ -95,9 +130,15 @@ const dialogWidth = ref(1000);
 const dialogHeight = ref(600);
 const sessionId = ref<string>("");
 const error = ref<string>("");
+const initialPlanFilenames = ref<Set<string>>(new Set());
+
+const newPlans = computed(() =>
+  props.discoveredPlans.filter((p) => !initialPlanFilenames.value.has(p.filename))
+);
 
 watch(open, async (value) => {
   if (value) {
+    initialPlanFilenames.value = new Set(props.discoveredPlans.map((p) => p.filename));
     error.value = "";
     sessionId.value = "";
     try {
@@ -143,6 +184,11 @@ function onClose(): void {
 
 function onDone(): void {
   emit("planCreated");
+  open.value = false;
+}
+
+function onUsePlan(plan: DiscoveredPlan): void {
+  emit("planCreated", plan.path);
   open.value = false;
 }
 </script>

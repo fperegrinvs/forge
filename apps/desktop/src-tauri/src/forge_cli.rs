@@ -49,6 +49,12 @@ pub fn run_forge_json(app: &AppHandle, cwd: &Path, args: &[String]) -> Result<se
   let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
   if !output.status.success() {
+    // The CLI uses exit code 2 for structured failures (e.g. validation failed)
+    // where stdout still contains valid JSON with the result details.
+    // Try to parse stdout first; only return an error if stdout isn't valid JSON.
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stdout) {
+      return Ok(value);
+    }
     return Err(format!(
       "forge command failed (status={:?}). stderr: {}",
       output.status.code(),
