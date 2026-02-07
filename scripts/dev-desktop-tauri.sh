@@ -14,5 +14,17 @@ if [[ ! -f "$FORGE_DESKTOP_FORGE_ENTRY_JS" ]]; then
 fi
 
 cd "$ROOT/apps/desktop/src-tauri"
-exec cargo tauri dev "$@"
 
+# Keep `apps/desktop/dist` up to date for the embedded single-port server.
+cd "$ROOT/apps/desktop"
+if command -v bun >/dev/null 2>&1; then
+  bun run dev:singleport &
+else
+  # Fallback (Bun not installed): use local Vite.
+  ./node_modules/.bin/vite build --watch &
+fi
+WATCH_PID="$!"
+trap 'kill "$WATCH_PID" 2>/dev/null || true' EXIT
+
+cd "$ROOT/apps/desktop/src-tauri"
+exec cargo tauri dev "$@"

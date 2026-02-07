@@ -21,6 +21,7 @@ Notes:
 - `dev` runs the Vite dev server on port `5173` (useful for UI-only iteration).
 - `dev:singleport` keeps `apps/desktop/dist/` up to date for the embedded app-server (port `1420`).
 - The desktop UI talks to the backend via HTTP `/api/*` (single origin), not Tauri `invoke()`.
+- `bun run dev:desktop:tauri` is the recommended way to start Tauri in dev (it starts the watcher + `cargo tauri dev`).
 
 ## Packs + Guidance Updates
 
