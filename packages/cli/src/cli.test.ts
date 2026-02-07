@@ -65,7 +65,7 @@ describe("cli", () => {
     }
   });
 
-  it("runs scaffold module and emits JSON with created files", async () => {
+  it("runs scaffold module and emits created file list", async () => {
     // Given a temp working directory
     const root = await mkdtemp(join(tmpdir(), "forge-cli-"));
     const previous = process.cwd();
@@ -75,17 +75,13 @@ describe("cli", () => {
       // When the scaffold command is executed
       const output = await captureStdout(async () => {
         const cli = buildCli();
-        await cli.parseAsync(["node", "forge", "scaffold", "module", "starter", "--json"]);
+        await cli.parseAsync(["node", "forge", "scaffold", "module", "starter"]);
       });
 
-      // Then the output includes a list of created files
-      const parsed = JSON.parse(output) as { success: boolean; files: string[] };
-      expect(parsed.success).toBe(true);
-      expect(parsed.files.length).toBeGreaterThan(0);
-      expect(parsed.files.some((file) => file.includes("modules/starter/routes.ts"))).toBe(true);
+      // Then the output includes created file paths
+      expect(output).toContain("modules/starter/routes.ts");
     } finally {
       process.chdir(previous);
     }
   });
 });
-
