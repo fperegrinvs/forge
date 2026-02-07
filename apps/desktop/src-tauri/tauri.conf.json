@@ -10,6 +10,9 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
+        "url": "http://127.0.0.1:1420/",
         "title": "Forge Desktop",
         "width": 1400,
         "height": 900
