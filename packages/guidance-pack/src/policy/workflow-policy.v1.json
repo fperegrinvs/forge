@@ -14,6 +14,12 @@
     "require_property_tests": true,
     "require_contract_tests": true,
     "require_docs_updates": true,
+    "coverage_thresholds": {
+      "lines": 80,
+      "statements": 80,
+      "functions": 75,
+      "branches": 70
+    },
     "mock_policy": "strict_boundary",
     "allow_mocks_only_for": [
       "adapter_boundary",
@@ -28,13 +34,14 @@
   },
   "commands": {
     "gates": {
-      "spec": "npm run typecheck && npm run test -- --runInBand --passWithNoTests=false",
-      "green": "npm run test && npm run typecheck && npm run lint",
-      "refactor": "npm run test && npm run typecheck && npm run lint",
-      "architecture": "npm run architecture:check",
-      "docs": "npm run docs:check",
+      "spec": "bun run typecheck && bun run test",
+      "green": "bun run test && bun run typecheck && bun run lint",
+      "refactor": "bun run test && bun run typecheck && bun run lint",
+      "architecture": "bun run architecture:check",
+      "docs": "bun run docs:check",
+      "coverage": "bun run test:coverage",
       "commit": "git status --porcelain",
-      "verify": "npm run test && npm run typecheck && npm run lint && npm run architecture:check && npm run test:desktop"
+      "verify": "bun run test:coverage && bun run typecheck && bun run lint && bun run architecture:check"
     }
   },
   "docs": {

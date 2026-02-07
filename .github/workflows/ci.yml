@@ -18,12 +18,21 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
       - name: Install
-        run: npm install
+        run: |
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            bun install --frozen-lockfile
+          else
+            bun install
+          fi
       - name: Toolchain preflight
         run: ./scripts/bootstrap-toolchain.sh --check
-      - name: Workflow assets in sync
-        run: npm run workflow:check-sync
-      - name: Workflow checks
-        run: npm run workflow:check
       - name: Verify
-        run: npm run verify
+        run: bun run verify
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage
+          if-no-files-found: ignore
+          retention-days: 7

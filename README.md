@@ -6,7 +6,7 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 
 - Implemented in this repo: Phases `0-2` (contracts/schema, template+guidance, desktop orchestrator MVP).
 - Remaining backlog: Phases `3-4` (hardening/recovery UX and unified distribution).
-- See `/Users/simon/projects/forge/docs/architecture.md` for explicit remaining work details.
+- See `docs/architecture.md` for explicit remaining work details.
 
 ## Packages
 
@@ -20,12 +20,25 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 - `@forge/cli`: Public `forge` CLI commands.
 - `@forge/desktop`: Tauri + Vue orchestrator UI.
 
+## Modules
+
+- Desktop app: `apps/desktop/README.md`
+- `@forge/contracts`: `packages/contracts/README.md`
+- `@forge/templates`: `packages/templates/README.md`
+- `@forge/guidance-pack`: `packages/guidance-pack/README.md`
+- `@forge/check-runner`: `packages/check-runner/README.md`
+- `@forge/adapter-codex`: `packages/adapter-codex/README.md`
+- `@forge/adapter-claude`: `packages/adapter-claude/README.md`
+- `@forge/control-plane`: `packages/control-plane/README.md`
+- `@forge/cli`: `packages/cli/README.md`
+- `@forge/shared-utils`: `packages/shared-utils/README.md`
+
 ## Quickstart
 
 1. Run `./scripts/bootstrap-toolchain.sh --check`.
-2. Install dependencies using your package manager (`bun install` preferred).
-3. Synchronize workflow assets with `npm run workflow:sync`.
-4. Run `npm run verify`.
+2. Install dependencies with `bun install` (this should generate `bun.lock`; commit it).
+3. Synchronize workflow assets with `bun run workflow:sync`.
+4. Run `bun run verify`.
 
 ## Core Commands
 
@@ -40,11 +53,12 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 
 ## Workflow Enforcement
 
-- Canonical policy: `/Users/simon/projects/forge/packages/guidance-pack/src/policy/workflow-policy.v1.json`
-- Sync generated assets and repo-level guidance links: `npm run workflow:sync`
-- Verify generated assets are up to date: `npm run workflow:check-sync`
-- Run hard-fail workflow checks for this repo: `npm run workflow:check`
-- Run architecture constraints check: `npm run architecture:check`
+- Canonical policy: `packages/guidance-pack/src/policy/workflow-policy.v1.json`
+- Sync generated assets and repo-level guidance links: `bun run workflow:sync`
+- Verify generated assets are up to date: `bun run workflow:check-sync`
+- Run hard-fail workflow checks for this repo: `bun run workflow:check`
+- Run architecture constraints check: `bun run architecture:check`
+- Install repo-managed git hooks: `bun run hooks:install`
 - Repo-local guidance is exposed via symlinks: `AGENTS.md`, `skills/`, `rules/`, `codex/`.
 - Claude compatibility symlinks are maintained: `CLAUDE.md` and `.claude/{CLAUDE.md,skills,rules}`.
 - Testing policy is fake-first. Mocks are restricted to `adapter_boundary` or `failure_simulation`.

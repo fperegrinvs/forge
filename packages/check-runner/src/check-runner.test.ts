@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { chmod } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { ScriptCheckRunner, loadTaskTypeRegistry } from "./check-runner.js";
+import "./index.js";
 
 describe("ScriptCheckRunner", () => {
   it("returns pass for successful script", async () => {

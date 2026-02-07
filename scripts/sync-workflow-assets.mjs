@@ -50,6 +50,10 @@ function renderAgents(policy) {
     gateLines.push(`- gate:architecture -> ${gateCommands.architecture}`);
   }
 
+  if (gateCommands.coverage) {
+    gateLines.push(`- gate:coverage -> ${gateCommands.coverage}`);
+  }
+
   gateLines.push(
     `- gate:docs -> ${gateCommands.docs}`,
     `- gate:commit -> ${gateCommands.commit}`,
@@ -63,10 +67,12 @@ function renderAgents(policy) {
     "",
     "## Required Workflow",
     `- Follow phases in order: ${phases}.`,
+    "- Before starting work: fetch latest (`git fetch origin`) and rebase onto `origin/main`.",
     "- Use code-first BDD with Given/When/Then comments in tests.",
     `- Prefer fakes over mocks. Mocks require annotation (${mockTag}) and are only for adapter_boundary or failure_simulation.`,
     "- Keep modulith boundaries and import restrictions intact.",
     "- Update documentation and decisions together with code changes.",
+    "- Never commit or push directly to `main`. Work on a `codex/*` branch and open a PR.",
     "",
     "## Canonical Gates",
     ...gateLines,
@@ -102,6 +108,24 @@ function renderTestingRule(policy) {
 
   gateLines.push(`Run gate:refactor with: ${gateCommands.refactor}`);
 
+  const thresholds = policy.quality.coverage_thresholds;
+  const coverageSection =
+    thresholds && gateCommands.coverage
+      ? [
+          "## Coverage",
+          "",
+          "Coverage is required and enforced in CI.",
+          `Run gate:coverage with: ${gateCommands.coverage}`,
+          "",
+          "Minimum thresholds:",
+          `- lines: ${String(thresholds.lines)}%`,
+          `- statements: ${String(thresholds.statements)}%`,
+          `- functions: ${String(thresholds.functions)}%`,
+          `- branches: ${String(thresholds.branches)}%`,
+          ""
+        ]
+      : [];
+
   return [
     "# Testing Rules",
     "",
@@ -119,6 +143,7 @@ function renderTestingRule(policy) {
     "Adapter-boundary reason is allowed only in:",
     boundaryGlobs,
     ...gateLines,
+    ...(coverageSection.length > 0 ? ["", ...coverageSection] : []),
     ""
   ].join("\n");
 }

@@ -17,7 +17,8 @@ export default tseslint.config(
       "apps/desktop/vite.config.ts",
       "packages/templates/src/assets/**",
       "eslint.config.ts",
-      "vitest.workspace.ts"
+      "vitest.workspace.ts",
+      "vitest.config.ts"
     ]
   },
   js.configs.recommended,

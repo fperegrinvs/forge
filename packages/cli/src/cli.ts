@@ -25,6 +25,17 @@ enum ExitCode {
   RuntimeFailed = 3
 }
 
+export class CliExit extends Error {
+  constructor(readonly code: ExitCode) {
+    super(`CLI exited with code ${String(code)}`);
+    this.name = "CliExit";
+  }
+}
+
+function exit(code: ExitCode): never {
+  throw new CliExit(code);
+}
+
 function output(result: unknown, useJson?: boolean): void {
   if (useJson) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -37,7 +48,7 @@ function output(result: unknown, useJson?: boolean): void {
 function fail(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}\n`);
-  process.exit(ExitCode.RuntimeFailed);
+  exit(ExitCode.RuntimeFailed);
 }
 
 function formatRunResult(result: {
@@ -114,12 +125,17 @@ export function buildCli(): Command {
           options.json
         );
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });
 
-  program
-    .command("scaffold module <module-name>")
+  const scaffold = program.command("scaffold");
+
+  scaffold
+    .command("module <module-name>")
     .option("--with-contract-test", "create contract test", true)
     .option("--without-contract-test", "skip contract test")
     .option("--with-property-test", "create property test", true)
@@ -133,6 +149,9 @@ export function buildCli(): Command {
         });
         output(options.json ? { success: true, module: moduleName, files: created } : created.join("\n"), options.json);
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });
@@ -168,6 +187,9 @@ export function buildCli(): Command {
           options.json
         );
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });
@@ -188,11 +210,14 @@ export function buildCli(): Command {
             ? "Plan invalid: legacy spec detected. Run 'forge plan migrate --file <path> --write'."
             : `Plan invalid (${String(result.issues.length)} issues)`;
           output(options.json ? result : message, options.json);
-          process.exit(ExitCode.ValidationFailed);
+          exit(ExitCode.ValidationFailed);
         }
 
         output(options.json ? result : "Plan valid", options.json);
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });
@@ -207,6 +232,9 @@ export function buildCli(): Command {
         const result = await migratePlanFile(options.file, options.write);
         output(options.json ? result : formatMigrationSummary(result), options.json);
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });
@@ -225,11 +253,14 @@ export function buildCli(): Command {
 
         if (result.state === "failed") {
           output(options.json ? result : formatRunResult(result), options.json);
-          process.exit(ExitCode.RuntimeFailed);
+          exit(ExitCode.RuntimeFailed);
         }
 
         output(options.json ? result : formatRunResult(result), options.json);
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });
@@ -251,17 +282,20 @@ export function buildCli(): Command {
               : `Run ${options.runId} is not paused or does not exist.`,
             options.json
           );
-          process.exit(ExitCode.RuntimeFailed);
+          exit(ExitCode.RuntimeFailed);
         }
 
         const result = await controlPlane.runNext(resolve(options.plan), options.adapter);
         if (result.state === "failed") {
           output(options.json ? result : formatRunResult(result), options.json);
-          process.exit(ExitCode.RuntimeFailed);
+          exit(ExitCode.RuntimeFailed);
         }
 
         output(options.json ? result : formatRunResult(result), options.json);
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });
@@ -278,11 +312,14 @@ export function buildCli(): Command {
         const result = await runWorkflowCheck(process.cwd(), resolve(options.plan), options.baseRef);
         if (!result.valid) {
           output(options.json ? result : formatWorkflowCheckSummary(result), options.json);
-          process.exit(ExitCode.ValidationFailed);
+          exit(ExitCode.ValidationFailed);
         }
 
         output(options.json ? result : formatWorkflowCheckSummary(result), options.json);
       } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
         fail(error);
       }
     });

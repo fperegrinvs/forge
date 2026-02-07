@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "dev.forge.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev --workspace @forge/desktop",
-    "beforeBuildCommand": "npm run build --workspace @forge/desktop",
+    "beforeDevCommand": "bun run --cwd .. dev",
+    "beforeBuildCommand": "bun run --cwd .. build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

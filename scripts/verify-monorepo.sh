@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ./scripts/bootstrap-toolchain.sh --check
-npm run workflow:check-sync
-npm run typecheck
-npm run lint
-npm run test
-npm run workflow:check
+bun run workflow:check-sync
+bun run docs:check
+bun run typecheck
+bun run lint
+bun run architecture:check
+bun run test:coverage
+bun run workflow:check

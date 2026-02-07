@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-npm run test && npm run typecheck && npm run lint
+bun run test && bun run typecheck && bun run lint

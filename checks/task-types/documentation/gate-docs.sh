@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-npm run docs:check
+bun run docs:check

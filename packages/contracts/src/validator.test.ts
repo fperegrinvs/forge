@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Plan } from "./types.js";
 import { validatePlanGraph, validatePlanSchema, validatePlanWorkflow } from "./validator.js";
+import "./index.js";
 
 const basePlan: Plan = {
   metadata: {

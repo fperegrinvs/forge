@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CodexAdapter } from "./adapter.js";
+import "./index.js";
 
 describe("CodexAdapter", () => {
   it("emits started output and completed events", async () => {

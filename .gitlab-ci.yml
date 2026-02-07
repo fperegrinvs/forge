@@ -16,8 +16,11 @@ verify:
     - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
     - export PATH="$HOME/.cargo/bin:$PATH"
   script:
-    - npm install
+    - if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile; else bun install; fi
     - ./scripts/bootstrap-toolchain.sh --check
-    - npm run workflow:check-sync
-    - npm run workflow:check
-    - npm run verify
+    - bun run verify
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - coverage/
