@@ -1,4 +1,21 @@
-import { invoke } from "@tauri-apps/api/core";
+async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
+  const response = await fetch(path, {
+    ...init,
+    headers
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `Request failed: ${String(response.status)} ${response.statusText}`);
+  }
+
+  return (await response.json()) as T;
+}
 
 export type ValidationIssue = { path: string; message: string; code: string };
 
@@ -42,11 +59,17 @@ export type PackUpdateStatus = {
 };
 
 export async function planValidate(projectRoot: string, planPath: string): Promise<ValidateResult> {
-  return await invoke<ValidateResult>("plan_validate", { projectRoot, planPath });
+  return await apiJson<ValidateResult>("/api/plan/validate", {
+    method: "POST",
+    body: JSON.stringify({ projectRoot, planPath })
+  });
 }
 
 export async function runNext(projectRoot: string, planPath: string, adapter: "codex" | "claude"): Promise<RunNextResult> {
-  return await invoke<RunNextResult>("run_next", { projectRoot, planPath, adapter });
+  return await apiJson<RunNextResult>("/api/run/next", {
+    method: "POST",
+    body: JSON.stringify({ projectRoot, planPath, adapter })
+  });
 }
 
 export async function resumeRun(
@@ -55,27 +78,38 @@ export async function resumeRun(
   runId: string,
   adapter: "codex" | "claude"
 ): Promise<RunNextResult> {
-  return await invoke<RunNextResult>("resume_run", { projectRoot, planPath, runId, adapter });
+  return await apiJson<RunNextResult>("/api/run/resume", {
+    method: "POST",
+    body: JSON.stringify({ projectRoot, planPath, runId, adapter })
+  });
 }
 
 export async function getEvidence(projectRoot: string, taskId: string): Promise<string[]> {
-  return await invoke<string[]>("get_evidence", { projectRoot, taskId });
+  const url = new URL("/api/evidence", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  url.searchParams.set("taskId", taskId);
+  return await apiJson<string[]>(url.toString(), { method: "GET" });
 }
 
 export async function projectGetGuidanceStatus(projectRoot: string): Promise<ProjectGuidanceStatus> {
-  return await invoke<ProjectGuidanceStatus>("project_get_guidance_status", { projectRoot });
+  const url = new URL("/api/project/guidance-status", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  return await apiJson<ProjectGuidanceStatus>(url.toString(), { method: "GET" });
 }
 
 export async function packsListInstalled(): Promise<InstalledPack[]> {
-  return await invoke<InstalledPack[]>("packs_list_installed");
+  return await apiJson<InstalledPack[]>("/api/packs/installed", { method: "GET" });
 }
 
 export async function packsCheckUpdates(): Promise<PackUpdateStatus[]> {
-  return await invoke<PackUpdateStatus[]>("packs_check_updates");
+  return await apiJson<PackUpdateStatus[]>("/api/packs/updates", { method: "GET" });
 }
 
 export async function packsDownload(packName: string, version?: string): Promise<InstalledPack> {
-  return await invoke<InstalledPack>("packs_download", { packName, version });
+  return await apiJson<InstalledPack>("/api/packs/download", {
+    method: "POST",
+    body: JSON.stringify({ packName, version })
+  });
 }
 
 export async function projectInstallGuidance(
@@ -83,9 +117,15 @@ export async function projectInstallGuidance(
   packPath: string,
   forceReplace: boolean
 ): Promise<unknown> {
-  return await invoke<unknown>("project_install_guidance", { projectRoot, packPath, forceReplace });
+  return await apiJson<unknown>("/api/project/install-guidance", {
+    method: "POST",
+    body: JSON.stringify({ projectRoot, packPath, forceReplace })
+  });
 }
 
 export async function pauseRun(runId: string): Promise<boolean> {
-  return await invoke<boolean>("pause_run", { runId });
+  return await apiJson<boolean>("/api/run/pause", {
+    method: "POST",
+    body: JSON.stringify({ runId })
+  });
 }

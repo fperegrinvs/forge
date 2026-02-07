@@ -8,6 +8,7 @@ From the repo root:
 
 ```bash
 bun run --filter @forge/desktop dev
+bun run --filter @forge/desktop dev:singleport
 bun run --filter @forge/desktop build
 bun run --filter @forge/desktop test
 bun run --filter @forge/desktop typecheck
@@ -16,6 +17,9 @@ bun run --filter @forge/desktop typecheck
 Notes:
 
 - Tauri config lives in `apps/desktop/src-tauri/tauri.conf.json`.
+- `dev` runs the Vite dev server on port `5173` (useful for UI-only iteration).
+- `dev:singleport` keeps `apps/desktop/dist/` up to date for the embedded app-server (port `1420`).
+- The desktop UI talks to the backend via HTTP `/api/*` (single origin), not Tauri `invoke()`.
 
 ## Packs + Guidance Updates
 

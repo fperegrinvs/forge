@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:singleport": "vite build --watch",
     "build": "vite build",
     "test": "vitest run",
     "typecheck": "tsc -b"

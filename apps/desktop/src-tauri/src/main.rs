@@ -2,11 +2,14 @@
 
 mod forge_cli;
 mod packs;
+mod http_server;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::Manager;
+use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
 
 use crate::forge_cli::run_forge_json;
 use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, read_installed_packs};
@@ -286,6 +289,45 @@ async fn project_install_guidance(
 
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let http_port = crate::http_server::port();
+
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = crate::http_server::serve(handle).await {
+                    eprintln!("forge desktop http server failed: {error}");
+                }
+            });
+
+            // Force the desktop UI to load from the local app-server (single origin: UI + API).
+            let target = Url::parse(&format!("http://127.0.0.1:{http_port}/"))
+                .map_err(|e| e.to_string())?;
+
+            if app.get_webview_window("main").is_none() {
+                // No window from config; create one.
+                let _ = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(target.clone()))
+                    .title("Forge Desktop")
+                    .inner_size(1400.0, 900.0)
+                    .build();
+            }
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Wait briefly for the server to bind before navigating.
+                for _ in 0..40 {
+                    if tokio::net::TcpStream::connect(("127.0.0.1", http_port)).await.is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.navigate(target);
+                }
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             plan_validate,
             run_next,
