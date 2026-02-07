@@ -36,3 +36,19 @@ Per task run, control-plane writes:
 - Monorepo-first, local template source for `forge init`.
 - Task execution is single-lane in v1.
 - Runtime integration is adapter-based to keep core runtime-agnostic.
+
+## Remaining Scope (After Phases 0-2)
+
+The current repository implements only Phases 0-2 from `docs/components-deep-dive.md`.
+
+### Phase 3: Hardening and Recovery UX (Not Implemented Yet)
+
+- Robust failure classification tuning.
+- Retry behavior tuning and stronger pause/resume recovery flows.
+- Expanded `task_type` check mappings and governance.
+
+### Phase 4: Forge Control Plane Distribution (Not Implemented Yet)
+
+- Unified distribution/packaging for CLI + guidance + desktop.
+- Upgrade and compatibility policy.
+- Standardized evidence export/import format for external consumers.

@@ -2,6 +2,12 @@
 
 Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive.md`.
 
+## Scope Status
+
+- Implemented in this repo: Phases `0-2` (contracts/schema, template+guidance, desktop orchestrator MVP).
+- Remaining backlog: Phases `3-4` (hardening/recovery UX and unified distribution).
+- See `/Users/simon/projects/forge/docs/architecture.md` for explicit remaining work details.
+
 ## Packages
 
 - `@forge/contracts`: Plan schema, validators, graph rules.
