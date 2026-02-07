@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "dev.forge.desktop",
   "build": {
-    "beforeDevCommand": "bun run --cwd .. dev:singleport",
-    "beforeBuildCommand": "bun run --cwd .. build",
+    "beforeDevCommand": "bun --cwd .. run dev:singleport",
+    "beforeBuildCommand": "bun --cwd .. run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
