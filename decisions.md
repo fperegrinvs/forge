@@ -2,6 +2,16 @@
 
 Track repository-level technical decisions and rationale.
 
+## 2026-02-07 (unified Run action & schema improvements)
+- Unified "Run Next" and "Resume" into a single "Run" action: `runNext()` now auto-resumes paused state (sets task from "paused" to "pending", clears `pausedRun`) instead of returning early, eliminating the need for a separate resume step.
+- Removed the redundant `pausedRunId` field from `RuntimeState` (was always a copy of `pausedRun.runId`); kept a read-time migration in `loadState()` for existing state files.
+- Removed `/api/run/resume` and `/api/run/pause` endpoints from the desktop Rust backend, and `resumeRun()`/`pauseRun()` from the frontend composable — `runNext` handles everything.
+- Added optional `status` field to plan task schema for BDD phase tracking ("spec", "implement", "refactor", "document", "completed").
+- Removed `unknown_task_type` validation from graph validator — task types are open-ended and not restricted to a check-runner registry.
+- Embedded the authoritative JSON schema in `plan-constraints.md` with a sync test to keep it aligned with the contracts source of truth.
+- NewPlanDialog now detects plans created during the terminal session, shows validation status inline, and offers a "Use Plan" button to select them.
+- `forge_cli.rs` now treats CLI exit code 2 (structured validation failure) as valid JSON output instead of an error.
+
 ## 2026-02-07 (agent-native skill commands & dialog UX)
 - `installGuidance` now registers skills as agent-native commands: `.claude/commands/<name>.md` for Claude Code (YAML frontmatter stripped) and `.agents/skills/<name>/SKILL.md` for Codex (full content preserved). This lets both agents discover Forge skills as native slash commands without manual setup.
 - Added `stripFrontmatter` helper to remove YAML frontmatter blocks from SKILL.md files, since Claude Code commands don't use frontmatter.
