@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 fn resolve_forge_bin_from_resources(app: &AppHandle) -> Option<PathBuf> {
   let resource_dir = app.path().resource_dir().ok()?;
@@ -15,7 +15,7 @@ fn resolve_forge_bin_from_resources(app: &AppHandle) -> Option<PathBuf> {
     vec![resource_dir.join("forge"), resource_dir.join("bin").join("forge")]
   };
 
-  candidates.into_iter().find(|path| path.exists())
+  candidates.into_iter().find(|path: &PathBuf| path.exists())
 }
 
 fn resolve_forge_command(app: &AppHandle) -> (PathBuf, Vec<String>) {

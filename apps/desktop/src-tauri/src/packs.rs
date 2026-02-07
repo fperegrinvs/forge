@@ -142,7 +142,7 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 pub fn fetch_packs_index() -> Result<PacksIndex, String> {
   let url = packs_index_url();
   let output = Command::new("curl")
-    .args(["-fsSL", &url])
+    .args(["-fsSL", "--connect-timeout", "15", "--max-time", "60", &url])
     .output()
     .map_err(|error| format!("fetch packs index via curl: {error}"))?;
   if !output.status.success() {
@@ -195,7 +195,7 @@ pub fn compute_update_status(index: &PacksIndex, installed: &[InstalledPack]) ->
       let installed_version = installed_latest.get(&name).cloned();
       let latest_version = latest_by_name.get(&name).cloned();
       let has_update = match (&installed_version, &latest_version) {
-        (Some(i), Some(l)) => i != l,
+        (Some(i), Some(l)) => newer_version(l, i),
         (None, Some(_)) => true,
         _ => false,
       };
@@ -256,10 +256,11 @@ pub fn download_and_install_pack(app_data_dir: &Path, pack_name: &str, version: 
   let temp_path = app_tmp.join(format!("pack-{}-{}-{}.{}", pack_name, pack.version, now, ext));
 
   let status = Command::new("curl")
-    .args(["-fsSL", &url, "-o", temp_path.to_string_lossy().as_ref()])
+    .args(["-fsSL", "--connect-timeout", "15", "--max-time", "300", &url, "-o", temp_path.to_string_lossy().as_ref()])
     .status()
     .map_err(|error| format!("download pack archive via curl: {error}"))?;
   if !status.success() {
+    let _ = fs::remove_file(&temp_path);
     return Err(format!("curl download failed (status={:?})", status.code()));
   }
 
@@ -267,6 +268,7 @@ pub fn download_and_install_pack(app_data_dir: &Path, pack_name: &str, version: 
   let actual = sha256_file(&temp_path)?;
   let expected = pack.sha256.to_lowercase();
   if actual.to_lowercase() != expected {
+    let _ = fs::remove_file(&temp_path);
     return Err(format!(
       "sha256 mismatch for {pack_name}@{}: expected={expected} actual={actual}",
       pack.version
@@ -287,18 +289,26 @@ pub fn download_and_install_pack(app_data_dir: &Path, pack_name: &str, version: 
   }
   fs::create_dir_all(&staging).map_err(|error| format!("mkdir staging dir: {error}"))?;
 
-  if pack.asset.ends_with(".zip") {
-    validate_zip_archive(&temp_path)?;
-    extract_zip_archive(&temp_path, &staging)?;
-    reject_symlinks_in_dir(&staging)?;
+  let extract_result = if pack.asset.ends_with(".zip") {
+    validate_zip_archive(&temp_path)
+      .and_then(|_| extract_zip_archive(&temp_path, &staging))
+      .and_then(|_| reject_symlinks_in_dir(&staging))
   } else {
-    validate_tar_archive(&temp_path)?;
-    extract_tar_archive(&temp_path, &staging)?;
+    validate_tar_archive(&temp_path)
+      .and_then(|_| extract_tar_archive(&temp_path, &staging))
+  };
+
+  if let Err(error) = extract_result {
+    let _ = fs::remove_file(&temp_path);
+    let _ = fs::remove_dir_all(&staging);
+    return Err(error);
   }
+
+  let _ = fs::remove_file(&temp_path);
 
   let final_dir = root.join(&pack.name).join(&pack.version);
   if final_dir.exists() {
-    // Already installed.
+    let _ = fs::remove_dir_all(&staging);
     return Ok(InstalledPack {
       name: pack.name,
       version: pack.version,
@@ -306,16 +316,15 @@ pub fn download_and_install_pack(app_data_dir: &Path, pack_name: &str, version: 
     });
   }
 
-  fs::create_dir_all(final_dir.parent().unwrap()).map_err(|error| format!("mkdir pack dir: {error}"))?;
-  fs::rename(&staging, &final_dir).map_err(|error| format!("move pack into place: {error}"))?;
-
   // Basic sanity check: manifest exists.
-  let manifest_path = final_dir.join("manifest.json");
+  let manifest_path = staging.join("manifest.json");
   if !manifest_path.exists() {
+    let _ = fs::remove_dir_all(&staging);
     return Err("downloaded pack is missing manifest.json".to_string());
   }
 
-  let _ = fs::remove_file(&temp_path);
+  fs::create_dir_all(final_dir.parent().unwrap()).map_err(|error| format!("mkdir pack dir: {error}"))?;
+  fs::rename(&staging, &final_dir).map_err(|error| format!("move pack into place: {error}"))?;
 
   Ok(InstalledPack {
     name: pack.name,
@@ -449,8 +458,7 @@ fn reject_symlinks_in_dir(root: &Path) -> Result<(), String> {
   fn walk(path: &Path) -> Result<(), String> {
     for entry in fs::read_dir(path).map_err(|error| format!("read dir {path:?}: {error}"))? {
       let entry = entry.map_err(|error| format!("read dir entry: {error}"))?;
-      let meta = entry
-        .symlink_metadata()
+      let meta = fs::symlink_metadata(entry.path())
         .map_err(|error| format!("stat {:?}: {error}", entry.path()))?;
       if meta.file_type().is_symlink() {
         return Err(format!("extracted pack contains symlink (rejected): {:?}", entry.path()));
@@ -495,6 +503,58 @@ mod tests {
     assert_eq!(status[0].installed_version.as_deref(), Some("1.0.0"));
     assert_eq!(status[0].latest_version.as_deref(), Some("2.0.0"));
     assert!(status[0].has_update);
+  }
+
+  #[test]
+  fn compute_update_status_no_update_when_installed_is_newer() {
+    // Given the installed version is newer than the index version
+    let index = PacksIndex {
+      packs: vec![PackDescriptor {
+        name: "forge-guidance-pack".to_string(),
+        version: "1.0.0".to_string(),
+        asset: "x.zip".to_string(),
+        sha256: "00".to_string(),
+        workflow_policy_version: None,
+      }],
+    };
+    let installed = vec![InstalledPack {
+      name: "forge-guidance-pack".to_string(),
+      version: "2.0.0".to_string(),
+      path: "/tmp/x".to_string(),
+    }];
+
+    // When update status is computed
+    let status = compute_update_status(&index, &installed);
+
+    // Then it does not report an update (installed is already newer)
+    assert_eq!(status.len(), 1);
+    assert!(!status[0].has_update);
+  }
+
+  #[test]
+  fn compute_update_status_no_update_when_same_version() {
+    // Given the installed version matches the index version
+    let index = PacksIndex {
+      packs: vec![PackDescriptor {
+        name: "forge-guidance-pack".to_string(),
+        version: "1.0.0".to_string(),
+        asset: "x.zip".to_string(),
+        sha256: "00".to_string(),
+        workflow_policy_version: None,
+      }],
+    };
+    let installed = vec![InstalledPack {
+      name: "forge-guidance-pack".to_string(),
+      version: "1.0.0".to_string(),
+      path: "/tmp/x".to_string(),
+    }];
+
+    // When update status is computed
+    let status = compute_update_status(&index, &installed);
+
+    // Then it does not report an update
+    assert_eq!(status.len(), 1);
+    assert!(!status[0].has_update);
   }
 
   #[test]

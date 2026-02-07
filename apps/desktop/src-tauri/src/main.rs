@@ -6,6 +6,7 @@ mod packs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tauri::Manager;
 
 use crate::forge_cli::run_forge_json;
 use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, read_installed_packs};
@@ -36,20 +37,20 @@ struct RunNextResult {
     message: String,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn plan_validate(
     app: tauri::AppHandle,
-    projectRoot: String,
-    planPath: String
+    project_root: String,
+    plan_path: String
 ) -> Result<ValidationResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         // Delegate to the Forge CLI sidecar for real validation (schema + graph + workflow).
-        let cwd = PathBuf::from(projectRoot);
+        let cwd = PathBuf::from(project_root);
         let args = vec![
             "plan".to_string(),
             "validate".to_string(),
             "--file".to_string(),
-            planPath,
+            plan_path,
             "--json".to_string(),
         ];
 
@@ -78,20 +79,20 @@ async fn plan_validate(
     .map_err(|error| format!("plan_validate task join failed: {error:?}"))?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn run_next(
     app: tauri::AppHandle,
-    projectRoot: String,
-    planPath: String,
+    project_root: String,
+    plan_path: String,
     adapter: String
 ) -> Result<RunNextResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(projectRoot);
+        let cwd = PathBuf::from(project_root);
         let args = vec![
             "run".to_string(),
             "next".to_string(),
             "--plan".to_string(),
-            planPath,
+            plan_path,
             "--adapter".to_string(),
             adapter,
             "--json".to_string(),
@@ -111,29 +112,29 @@ async fn run_next(
     .map_err(|error| format!("run_next task join failed: {error:?}"))?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn pause_run(_run_id: String) -> bool {
     // v1: pause is filesystem-mediated via the control-plane state; CLI pause isn't exposed yet.
     true
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn resume_run(
     app: tauri::AppHandle,
-    projectRoot: String,
-    planPath: String,
-    runId: String,
+    project_root: String,
+    plan_path: String,
+    run_id: String,
     adapter: String
 ) -> Result<RunNextResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(projectRoot);
+        let cwd = PathBuf::from(project_root);
         let args = vec![
             "run".to_string(),
             "resume".to_string(),
             "--plan".to_string(),
-            planPath,
+            plan_path,
             "--run-id".to_string(),
-            runId,
+            run_id,
             "--adapter".to_string(),
             adapter,
             "--json".to_string(),
@@ -153,10 +154,10 @@ async fn resume_run(
     .map_err(|error| format!("resume_run task join failed: {error:?}"))?
 }
 
-#[tauri::command]
-async fn get_evidence(projectRoot: String, taskId: String) -> Result<Vec<String>, String> {
+#[tauri::command(rename_all = "camelCase")]
+async fn get_evidence(project_root: String, task_id: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let evidence_root = PathBuf::from(projectRoot).join(".forge").join("evidence");
+        let evidence_root = PathBuf::from(project_root).join(".forge").join("evidence");
         if !evidence_root.exists() {
             return Ok(vec![]);
         }
@@ -167,7 +168,7 @@ async fn get_evidence(projectRoot: String, taskId: String) -> Result<Vec<String>
         if let Some(items) = parsed.as_array() {
             for item in items {
                 let item_task = item.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
-                if item_task != taskId {
+                if item_task != task_id {
                     continue;
                 }
                 if let Some(dir) = item.get("dir").and_then(|v| v.as_str()) {
@@ -197,10 +198,10 @@ struct ProjectGuidanceStatus {
     manifest: Option<GuidanceManifest>,
 }
 
-#[tauri::command]
-async fn project_get_guidance_status(projectRoot: String) -> Result<ProjectGuidanceStatus, String> {
+#[tauri::command(rename_all = "camelCase")]
+async fn project_get_guidance_status(project_root: String) -> Result<ProjectGuidanceStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(projectRoot).join("manifest.json");
+        let path = PathBuf::from(project_root).join("manifest.json");
         if !path.exists() {
             return Ok(ProjectGuidanceStatus { installed: false, manifest: None });
         }
@@ -243,38 +244,38 @@ async fn packs_check_updates(app: tauri::AppHandle) -> Result<Vec<crate::packs::
     .map_err(|error| format!("packs_check_updates join failed: {error:?}"))?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn packs_download(
     app: tauri::AppHandle,
-    packName: String,
+    pack_name: String,
     version: Option<String>
 ) -> Result<crate::packs::InstalledPack, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let app_data = app.path().app_data_dir().map_err(|error| format!("resolve app data dir: {error}"))?;
-        download_and_install_pack(&app_data, &packName, version.as_deref())
+        download_and_install_pack(&app_data, &pack_name, version.as_deref())
     })
     .await
     .map_err(|error| format!("packs_download join failed: {error:?}"))?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn project_install_guidance(
     app: tauri::AppHandle,
-    projectRoot: String,
-    packPath: String,
-    forceReplace: bool
+    project_root: String,
+    pack_path: String,
+    force_replace: bool
 ) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(projectRoot);
+        let cwd = PathBuf::from(project_root);
         let mut args = vec![
             "install-guidance".to_string(),
             "--source".to_string(),
             "path".to_string(),
             "--path".to_string(),
-            packPath,
+            pack_path,
             "--json".to_string(),
         ];
-        if forceReplace {
+        if force_replace {
             args.push("--force-replace".to_string());
         }
         run_forge_json(&app, &cwd, &args)
