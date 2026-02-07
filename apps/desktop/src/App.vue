@@ -210,6 +210,7 @@ import {
   packsListInstalled,
   planValidate,
   plansList,
+  plansRead,
   plansStatus,
   projectGetGuidanceStatus,
   projectInstallGuidance,
@@ -363,8 +364,7 @@ function onSelectPlan(plan: DiscoveredPlan): void {
   logs.value.unshift(`Selected plan: ${plan.filename}`);
 
   // Load the plan JSON to populate the DAG
-  fetch(plan.path)
-    .then((r) => r.json())
+  plansRead(plan.path)
     .then((json: unknown) => {
       const planJson = json as { tasks?: { id: string; dependencies: string[] }[] };
       if (Array.isArray(planJson.tasks)) {

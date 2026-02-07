@@ -163,3 +163,9 @@ export async function plansStatus(projectRoot: string, planPath: string): Promis
   return await apiJson<PlanStatusResult>(url.toString(), { method: "GET" });
 }
 
+export async function plansRead(planPath: string): Promise<unknown> {
+  const url = new URL("/api/plans/read", window.location.origin);
+  url.searchParams.set("planPath", planPath);
+  return await apiJson<unknown>(url.toString(), { method: "GET" });
+}
+

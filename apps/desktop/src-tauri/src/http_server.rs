@@ -643,6 +643,29 @@ async fn plans_status(
     .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanReadQuery {
+    plan_path: String,
+}
+
+async fn plans_read(
+    Query(query): Query<PlanReadQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&query.plan_path);
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|e| format!("read plan: {e}"))?;
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("parse plan: {e}"))?;
+        Ok::<_, String>(value)
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
 async fn terminal_spawn(
     State(state): State<ServerState>,
     Json(config): Json<crate::terminal::SpawnConfig>,
@@ -833,6 +856,7 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/project/init", post(project_init))
         .route("/api/plans/list", get(plans_list))
         .route("/api/plans/status", get(plans_status))
+        .route("/api/plans/read", get(plans_read))
         .route("/api/dialog/select-folder", get(select_folder))
         .route("/api/terminal/spawn", post(terminal_spawn))
         .route("/api/terminal/:id", delete(terminal_kill))
