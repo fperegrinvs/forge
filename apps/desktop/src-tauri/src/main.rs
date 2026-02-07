@@ -3,6 +3,7 @@
 mod forge_cli;
 mod packs;
 mod http_server;
+mod terminal;
 
 use serde::{Deserialize, Serialize};
 use std::fs;

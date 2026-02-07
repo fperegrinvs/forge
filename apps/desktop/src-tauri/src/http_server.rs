@@ -1,10 +1,11 @@
 use axum::{
-    extract::{Query, State},
+    extract::{ws::{Message, WebSocket}, Path as AxumPath, Query, State, WebSocketUpgrade},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use tauri::AppHandle;
@@ -13,12 +14,14 @@ use tower_http::services::ServeDir;
 
 use crate::forge_cli::run_forge_json;
 use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs, read_bundled_packs, read_installed_packs};
+use crate::terminal::TerminalManager;
 
 #[derive(Clone)]
 struct ServerState {
     app: AppHandle,
     frontend_dist: PathBuf,
     bundled_packs_dir: Option<PathBuf>,
+    terminal: TerminalManager,
 }
 
 fn resolve_bundled_packs_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -593,6 +596,130 @@ async fn pause_run(Json(_body): Json<serde_json::Value>) -> impl IntoResponse {
     Json(true)
 }
 
+async fn terminal_spawn(
+    State(state): State<ServerState>,
+    Json(config): Json<crate::terminal::SpawnConfig>,
+) -> Result<Json<crate::terminal::SpawnResult>, (StatusCode, String)> {
+    let terminal = state.terminal.clone();
+    tokio::task::spawn_blocking(move || {
+        let session_id = terminal.spawn(config)?;
+        Ok::<_, String>(crate::terminal::SpawnResult { session_id })
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
+async fn terminal_kill(
+    State(state): State<ServerState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<bool>, (StatusCode, String)> {
+    state
+        .terminal
+        .kill(&id)
+        .map(|()| Json(true))
+        .map_err(|e| api_error(StatusCode::NOT_FOUND, e))
+}
+
+async fn terminal_resize(
+    State(state): State<ServerState>,
+    AxumPath(id): AxumPath<String>,
+    Json(req): Json<crate::terminal::ResizeRequest>,
+) -> Result<Json<bool>, (StatusCode, String)> {
+    state
+        .terminal
+        .resize(&id, req.cols, req.rows)
+        .map(|()| Json(true))
+        .map_err(|e| api_error(StatusCode::NOT_FOUND, e))
+}
+
+async fn terminal_ws(
+    State(state): State<ServerState>,
+    AxumPath(id): AxumPath<String>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    let terminal = state.terminal.clone();
+    ws.on_upgrade(move |socket| handle_terminal_ws(socket, terminal, id))
+}
+
+async fn handle_terminal_ws(socket: WebSocket, terminal: TerminalManager, id: String) {
+    let (reader, writer) = match terminal.take_io(&id) {
+        Ok(io) => io,
+        Err(_) => return,
+    };
+
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    let (tx_to_ws, mut rx_to_ws) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    let (tx_to_pty, rx_to_pty) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+
+    // PTY reader → channel → WebSocket
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let mut reader = reader;
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if tx_to_ws.blocking_send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Channel → PTY writer
+    tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut writer = writer;
+        let mut rx = rx_to_pty;
+        while let Some(data) = rx.blocking_recv() {
+            if writer.write_all(&data).is_err() {
+                break;
+            }
+            let _ = writer.flush();
+        }
+    });
+
+    // Forward WebSocket messages → PTY stdin
+    let ws_to_pty = async {
+        while let Some(Ok(msg)) = ws_receiver.next().await {
+            match msg {
+                Message::Text(text) => {
+                    if tx_to_pty.send(text.into_bytes()).await.is_err() {
+                        break;
+                    }
+                }
+                Message::Binary(data) => {
+                    if tx_to_pty.send(data.to_vec()).await.is_err() {
+                        break;
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+    };
+
+    // Forward PTY stdout → WebSocket
+    let pty_to_ws = async {
+        while let Some(data) = rx_to_ws.recv().await {
+            if ws_sender.send(Message::Binary(data.into())).await.is_err() {
+                break;
+            }
+        }
+    };
+
+    tokio::select! {
+        _ = ws_to_pty => {},
+        _ = pty_to_ws => {},
+    }
+}
+
 async fn spa_index(State(state): State<ServerState>) -> impl IntoResponse {
     let index_path = state.frontend_dist.join("index.html");
     match tokio::fs::read_to_string(index_path).await {
@@ -643,6 +770,7 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         app,
         frontend_dist: frontend_dist.clone(),
         bundled_packs_dir,
+        terminal: TerminalManager::new(),
     };
     let api = Router::new()
         .route("/api/debug/status", get(debug_status))
@@ -659,6 +787,10 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/templates", get(list_templates))
         .route("/api/project/init", post(project_init))
         .route("/api/dialog/select-folder", get(select_folder))
+        .route("/api/terminal/spawn", post(terminal_spawn))
+        .route("/api/terminal/:id", delete(terminal_kill))
+        .route("/api/terminal/:id/resize", post(terminal_resize))
+        .route("/api/terminal/:id/ws", get(terminal_ws))
         .with_state(state.clone());
 
     let assets_dir = frontend_dist.join("assets");
