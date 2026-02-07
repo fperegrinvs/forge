@@ -61,6 +61,58 @@ pub fn packs_root(app_data_dir: &Path) -> PathBuf {
   app_data_dir.join("packs")
 }
 
+/// Reads bundled packs from a directory where each subdirectory is a pack
+/// containing a manifest.json. Packs without a manifest are skipped.
+pub fn read_bundled_packs(bundled_dir: &Path) -> Result<Vec<InstalledPack>, String> {
+  if !bundled_dir.exists() {
+    return Ok(vec![]);
+  }
+
+  let mut packs = vec![];
+  let entries = fs::read_dir(bundled_dir).map_err(|error| format!("read bundled packs dir: {error}"))?;
+  for entry in entries {
+    let entry = entry.map_err(|error| format!("read bundled pack entry: {error}"))?;
+    if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+      continue;
+    }
+    let manifest_path = entry.path().join("manifest.json");
+    if !manifest_path.exists() {
+      continue;
+    }
+    let raw = fs::read_to_string(&manifest_path)
+      .map_err(|error| format!("read bundled manifest {:?}: {error}", manifest_path))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+      .map_err(|error| format!("parse bundled manifest {:?}: {error}", manifest_path))?;
+
+    let name = value.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let version = value.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0").to_string();
+    if name.is_empty() {
+      continue;
+    }
+    packs.push(InstalledPack {
+      name,
+      version,
+      path: entry.path().to_string_lossy().to_string(),
+    });
+  }
+  Ok(packs)
+}
+
+/// Merges bundled packs into a downloaded packs list.
+/// If a downloaded pack has the same name as a bundled pack, the downloaded version wins.
+pub fn merge_bundled_packs(bundled: Vec<InstalledPack>, downloaded: Vec<InstalledPack>) -> Vec<InstalledPack> {
+  let downloaded_names: std::collections::HashSet<String> =
+    downloaded.iter().map(|p| p.name.clone()).collect();
+
+  let mut merged = downloaded;
+  for pack in bundled {
+    if !downloaded_names.contains(&pack.name) {
+      merged.push(pack);
+    }
+  }
+  merged
+}
+
 fn parse_repo_env() -> (String, String) {
   // `owner/repo` (default is intentionally generic; override in dev/prod).
   let value = std::env::var("FORGE_DESKTOP_PACKS_REPO").unwrap_or_else(|_| "forge/forge".to_string());

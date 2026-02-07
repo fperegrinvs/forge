@@ -12,12 +12,33 @@ use tauri::Manager;
 use tower_http::services::ServeDir;
 
 use crate::forge_cli::run_forge_json;
-use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, read_installed_packs};
+use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs, read_bundled_packs, read_installed_packs};
 
 #[derive(Clone)]
 struct ServerState {
     app: AppHandle,
     frontend_dist: PathBuf,
+    bundled_packs_dir: Option<PathBuf>,
+}
+
+fn resolve_bundled_packs_dir(app: &AppHandle) -> Option<PathBuf> {
+    // Dev: the guidance pack source is at packages/guidance-pack/src/assets/pack/manifest.json.
+    // read_bundled_packs expects a dir whose subdirectories each contain manifest.json,
+    // so we return the assets/ dir (which contains the "pack" subdirectory).
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../packages/guidance-pack/src/assets");
+    if dev.join("pack").join("manifest.json").exists() {
+        return Some(dev);
+    }
+
+    // Prod: check Tauri resource directory for bundled-packs/ (mapped in tauri.conf.json).
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("bundled-packs");
+        if bundled.exists() {
+            return Some(bundled);
+        }
+    }
+
+    None
 }
 
 fn resolve_frontend_dist_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -379,14 +400,22 @@ async fn packs_list_installed(
     State(state): State<ServerState>,
 ) -> Result<Json<Vec<InstalledPack>>, (StatusCode, String)> {
     let app = state.app.clone();
+    let bundled_dir = state.bundled_packs_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let app_data = app
             .path()
             .app_data_dir()
             .map_err(|error| format!("resolve app data dir: {error}"))?;
-        let installed = read_installed_packs(&app_data)?;
+        let downloaded = read_installed_packs(&app_data)?;
+
+        let bundled = match bundled_dir {
+            Some(dir) => read_bundled_packs(&dir).unwrap_or_default(),
+            None => vec![],
+        };
+
+        let merged = merge_bundled_packs(bundled, downloaded);
         Ok::<_, String>(
-            installed
+            merged
                 .into_iter()
                 .map(|p| InstalledPack {
                     name: p.name,
@@ -406,14 +435,24 @@ async fn packs_check_updates(
     State(state): State<ServerState>,
 ) -> Result<Json<Vec<PackUpdateStatus>>, (StatusCode, String)> {
     let app = state.app.clone();
+    let bundled_dir = state.bundled_packs_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let index = fetch_packs_index()?;
+        // Fetch remote index; if offline, return empty update statuses gracefully.
+        let index = match fetch_packs_index() {
+            Ok(idx) => idx,
+            Err(_) => return Ok::<_, String>(vec![]),
+        };
 
         let app_data = app
             .path()
             .app_data_dir()
             .map_err(|error| format!("resolve app data dir: {error}"))?;
-        let installed = read_installed_packs(&app_data)?;
+        let downloaded = read_installed_packs(&app_data)?;
+        let bundled = match bundled_dir {
+            Some(dir) => read_bundled_packs(&dir).unwrap_or_default(),
+            None => vec![],
+        };
+        let installed = merge_bundled_packs(bundled, downloaded);
         let statuses = compute_update_status(&index, &installed);
 
         Ok::<_, String>(
@@ -547,9 +586,12 @@ async fn debug_status(State(state): State<ServerState>) -> Json<DebugStatus> {
 pub async fn serve(app: AppHandle) -> Result<(), String> {
     let frontend_dist = resolve_frontend_dist_dir(&app)?;
 
+    let bundled_packs_dir = resolve_bundled_packs_dir(&app);
+
     let state = ServerState {
         app,
         frontend_dist: frontend_dist.clone(),
+        bundled_packs_dir,
     };
     let api = Router::new()
         .route("/api/debug/status", get(debug_status))

@@ -21,6 +21,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "resources": {
+      "../../../packages/guidance-pack/src/assets/pack": "bundled-packs/pack"
+    }
   }
 }

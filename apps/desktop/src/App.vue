@@ -143,7 +143,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import PlanGraph from "./components/PlanGraph.vue";
 import {
   getEvidence,
@@ -186,6 +186,19 @@ const tasks = ref([
   { id: "task-1", dependencies: [] },
   { id: "task-2", dependencies: ["task-1"] }
 ]);
+
+onMounted(async () => {
+  try {
+    installedPacks.value = await packsListInstalled();
+    const guidance = installedPacks.value.find((p) => p.name === "forge-guidance-pack");
+    if (guidance) {
+      downloadedGuidancePackPath.value = guidance.path;
+    }
+    packLogs.value.unshift(`Loaded ${installedPacks.value.length} pack(s) on startup`);
+  } catch (error) {
+    packLogs.value.unshift(`Startup pack load error: ${String(error)}`);
+  }
+});
 
 async function onValidate(): Promise<void> {
   try {
