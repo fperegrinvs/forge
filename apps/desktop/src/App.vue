@@ -23,7 +23,11 @@
             <v-row>
               <v-col cols="12" md="8">
                 <v-card class="pa-4 mb-4">
-                  <v-text-field v-model="projectRoot" label="Project root" density="comfortable" />
+                  <v-text-field v-model="projectRoot" label="Project root" density="comfortable" readonly @click="onBrowseProjectRoot">
+                    <template #append>
+                      <v-btn size="small" variant="text" @click="onBrowseProjectRoot">Browse</v-btn>
+                    </template>
+                  </v-text-field>
                   <v-text-field v-model="planPath" label="Plan path (relative to project root)" density="comfortable" />
 
                   <div v-if="discoveredPlans.length" class="mb-3">
@@ -107,7 +111,11 @@
               <v-col cols="12" md="7">
                 <v-card class="pa-4 mb-4">
                   <h2 class="text-h6 mb-3">Guidance Pack</h2>
-                  <v-text-field v-model="projectRoot" label="Project root" density="comfortable" />
+                  <v-text-field v-model="projectRoot" label="Project root" density="comfortable" readonly @click="onBrowseProjectRoot">
+                    <template #append>
+                      <v-btn size="small" variant="text" @click="onBrowseProjectRoot">Browse</v-btn>
+                    </template>
+                  </v-text-field>
 
                   <div class="d-flex flex-wrap ga-2 mb-3">
                     <v-btn color="primary" variant="outlined" @click="onRefreshGuidance">Refresh Status</v-btn>
@@ -199,6 +207,7 @@ import {
   projectInstallGuidance,
   resumeRun,
   runNext,
+  selectFolder,
   type InstalledPack,
   type PlanFileEntry,
   type ProjectGuidanceStatus,
@@ -363,6 +372,17 @@ function onSelectPlan(plan: DiscoveredPlan): void {
     .catch(() => {
       // best-effort
     });
+}
+
+async function onBrowseProjectRoot(): Promise<void> {
+  try {
+    const folder = await selectFolder();
+    if (folder) {
+      projectRoot.value = folder;
+    }
+  } catch (error) {
+    logs.value.unshift(`Folder picker failed: ${String(error)}`);
+  }
 }
 
 function onProjectCreated(newProjectRoot: string): void {
