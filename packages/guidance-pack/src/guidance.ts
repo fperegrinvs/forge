@@ -47,62 +47,6 @@ export async function discoverSkills(guidanceRoot: string): Promise<SkillDescrip
   return skills;
 }
 
-export async function installGuidanceFromPackRoot(
-  packRoot: string,
-  targetRoot: string,
-  options: InstallGuidanceOptions = {}
-): Promise<InstallGuidanceResult> {
-  const sourceFiles = await listFilesRecursive(packRoot);
-  const result: InstallGuidanceResult = {
-    installed: [],
-    updated: [],
-    skipped: []
-  };
-
-  for (const source of sourceFiles) {
-    const rel = relative(packRoot, source);
-    const destination = join(targetRoot, rel);
-    const destinationDir = dirname(destination);
-
-    await mkdir(destinationDir, { recursive: true });
-
-    // Guidance packs are primarily text, but treat files as bytes so we don't corrupt
-    // non-UTF8 content (images, binaries) if they appear later.
-    const sourceContent = await readFile(source);
-
-    if (!(await exists(destination))) {
-      await cp(source, destination);
-      result.installed.push(rel);
-      continue;
-    }
-
-    const existingContent = await readFile(destination);
-    if (hashBytes(existingContent) === hashBytes(sourceContent)) {
-      result.skipped.push(rel);
-      continue;
-    }
-
-    if (options.forceReplace) {
-      await cp(source, destination, { force: true });
-      result.updated.push(rel);
-    } else {
-      result.skipped.push(rel);
-    }
-  }
-
-  // Register skills as agent-native commands
-  const skillsDir = join(packRoot, "skills");
-  const registered = await registerSkillCommands(skillsDir, targetRoot);
-  for (const name of registered.claude) {
-    result.installed.push(join(".claude", "commands", `${name}.md`));
-  }
-  for (const name of registered.codex) {
-    result.installed.push(join(".agents", "skills", name, "SKILL.md"));
-  }
-
-  return result;
-}
-
 export function stripFrontmatter(content: string): string {
   if (!content.startsWith("---")) {
     return content;
@@ -176,6 +120,62 @@ export async function registerSkillCommands(
       await writeFile(codexPath, content, "utf8");
       result.codex.push(entry.name);
     }
+  }
+
+  return result;
+}
+
+export async function installGuidanceFromPackRoot(
+  packRoot: string,
+  targetRoot: string,
+  options: InstallGuidanceOptions = {}
+): Promise<InstallGuidanceResult> {
+  const sourceFiles = await listFilesRecursive(packRoot);
+  const result: InstallGuidanceResult = {
+    installed: [],
+    updated: [],
+    skipped: []
+  };
+
+  for (const source of sourceFiles) {
+    const rel = relative(packRoot, source);
+    const destination = join(targetRoot, rel);
+    const destinationDir = dirname(destination);
+
+    await mkdir(destinationDir, { recursive: true });
+
+    // Guidance packs are primarily text, but treat files as bytes so we don't corrupt
+    // non-UTF8 content (images, binaries) if they appear later.
+    const sourceContent = await readFile(source);
+
+    if (!(await exists(destination))) {
+      await cp(source, destination);
+      result.installed.push(rel);
+      continue;
+    }
+
+    const existingContent = await readFile(destination);
+    if (hashBytes(existingContent) === hashBytes(sourceContent)) {
+      result.skipped.push(rel);
+      continue;
+    }
+
+    if (options.forceReplace) {
+      await cp(source, destination, { force: true });
+      result.updated.push(rel);
+    } else {
+      result.skipped.push(rel);
+    }
+  }
+
+  // Register skills as agent-native commands
+  const skillsDir = join(packRoot, "skills");
+  const registered = await registerSkillCommands(skillsDir, targetRoot);
+  for (const name of registered.claude) {
+    result.installed.push(join(".claude", "commands", `${name}.md`));
+  }
+  for (const name of registered.codex) {
+    result.installed.push(join(".agents", "skills", name, "SKILL.md"));
   }
 
   return result;
