@@ -16,19 +16,29 @@ Adapter-boundary reason is allowed only in:
 - apps/**/*.test.ts
 - packages/adapter-*/**/*.test.ts
 - packages/**/src/**/*adapter*.test.ts
-Run gate:spec with: bun run typecheck && bun run test
-Run gate:green with: bun run test && bun run typecheck && bun run lint
-Run gate:architecture with: bun run architecture:check
-Run gate:refactor with: bun run test && bun run typecheck && bun run lint
 
 ## Coverage
 
 Coverage is required and enforced in CI.
-Run gate:coverage with: bun run test:coverage
 
 Minimum thresholds:
 - lines: 80%
 - statements: 80%
 - functions: 75%
 - branches: 70%
+
+
+## Property-Based Test Taxonomy
+
+- round-trip — encode then decode returns original
+- idempotence — applying operation twice equals applying once
+- invariant — property holds for all valid inputs
+- oracle — compare implementation against simple reference
+- no-invalid-state — constructor/factory never produces invalid state
+
+
+## Testing Patterns
+
+- Test public interfaces at every level; avoid reaching into private implementation
+- Use buildTestApp() to create a configured Fastify instance for integration tests
 

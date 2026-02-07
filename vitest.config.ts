@@ -64,6 +64,9 @@ export default defineConfig({
     alias: loadWorkspaceAliases()
   },
   test: {
+    // Workspace projects (replaces deprecated vitest.workspace.ts).
+    projects: ["packages/*", "apps/*"],
+
     // Coverage is enabled via `vitest run --coverage` (`bun run test:coverage`).
     coverage: {
       provider: "v8",
