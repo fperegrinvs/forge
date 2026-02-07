@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { loadTaskTypeRegistry } from "@forge/check-runner";
+import { loadBundledWorkflowPolicy } from "@forge/guidance-pack";
 import {
   CURRENT_PLAN_SPEC_VERSION,
   loadPlan,
@@ -37,6 +38,20 @@ export type PlanMigrationResult = {
 };
 
 const sourceExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".vue", ".rs"]);
+const directMockPrimitivePattern = /^\s*(?:await\s+)?(?:vi|jest)\.(?:mock|spyOn)\s*\(/;
+const assignedMockPrimitivePattern =
+  /^\s*(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*(?:await\s+)?(?:vi|jest)\.(?:mock|spyOn)\s*\(/;
+
+type MockPolicy = {
+  mockAnnotationTag: string;
+  allowedReasons: Set<string>;
+  boundaryGlobs: string[];
+};
+
+type MockUsage = {
+  line: number;
+  reason?: string;
+};
 
 function getSpecVersion(plan: unknown): string | undefined {
   if (!plan || typeof plan !== "object") {
@@ -138,6 +153,98 @@ function defaultBaseRef(baseRef?: string): string {
   return process.env.CI ? "origin/main" : "HEAD";
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function globToRegExp(glob: string): RegExp {
+  let pattern = "^";
+
+  for (let i = 0; i < glob.length; i += 1) {
+    const char = glob[i];
+    if (char === "*") {
+      const next = glob[i + 1];
+      if (next === "*") {
+        pattern += ".*";
+        i += 1;
+      } else {
+        pattern += "[^/]*";
+      }
+      continue;
+    }
+
+    pattern += escapeRegExp(char ?? "");
+  }
+
+  pattern += "$";
+  return new RegExp(pattern);
+}
+
+function matchesAnyGlob(path: string, globs: string[]): boolean {
+  return globs.some((glob) => globToRegExp(glob).test(path));
+}
+
+function annotationRegex(tag: string): RegExp {
+  return new RegExp(`//\\s*${escapeRegExp(tag)}\\s*:\\s*([a-z_]+)`);
+}
+
+function findAnnotationReason(lines: string[], lineIndex: number, tag: string): string | undefined {
+  const rx = annotationRegex(tag);
+  const candidateIndexes = [lineIndex - 1, lineIndex, lineIndex + 1];
+
+  for (const idx of candidateIndexes) {
+    if (idx < 0 || idx >= lines.length) {
+      continue;
+    }
+
+    const match = rx.exec(lines[idx] ?? "");
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return undefined;
+}
+
+function extractMockUsages(content: string, tag: string): MockUsage[] {
+  const lines = content.split("\n");
+  const usages: MockUsage[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    if (!directMockPrimitivePattern.test(line) && !assignedMockPrimitivePattern.test(line)) {
+      continue;
+    }
+
+    const reason = findAnnotationReason(lines, i, tag);
+    usages.push({
+      line: i + 1,
+      ...(reason ? { reason } : {})
+    });
+  }
+
+  return usages;
+}
+
+function normalizeMockPolicy(policy: Record<string, unknown>): MockPolicy {
+  const quality = (policy.quality ?? {}) as Record<string, unknown>;
+
+  const mockAnnotationTag =
+    typeof quality.mock_annotation_tag === "string" ? quality.mock_annotation_tag : "forge-mock";
+  const allowList = Array.isArray(quality.allow_mocks_only_for)
+    ? quality.allow_mocks_only_for.filter((item): item is string => typeof item === "string")
+    : ["adapter_boundary", "failure_simulation"];
+  const boundaryGlobs = Array.isArray(quality.mock_boundary_test_globs)
+    ? quality.mock_boundary_test_globs.filter((item): item is string => typeof item === "string")
+    : [];
+
+  return {
+    mockAnnotationTag,
+    allowedReasons: new Set(allowList),
+    boundaryGlobs
+  };
+}
+
 async function changedTestsContainBddMarkers(workspaceRoot: string, testFiles: string[]): Promise<boolean> {
   for (const testFile of testFiles) {
     const fullPath = resolve(workspaceRoot, testFile);
@@ -169,6 +276,7 @@ export async function runWorkflowCheck(
 ): Promise<WorkflowCheckResult> {
   const baseRef = defaultBaseRef(baseRefInput);
   const schemaValidation = await validatePlanSchema(await readJsonFile<unknown>(planPath));
+  const mockPolicy = normalizeMockPolicy(await loadBundledWorkflowPolicy());
 
   const issues: ValidationIssueLike[] = [];
   issues.push(...toIssues(schemaValidation.issues));
@@ -216,6 +324,44 @@ export async function runWorkflowCheck(
         message: "Changed tests must include Given/When/Then markers for code-first BDD.",
         code: "workflow_bdd_markers_missing"
       });
+    }
+
+    for (const testFile of changed.tests) {
+      const fullPath = resolve(workspaceRoot, testFile);
+      if (!(await exists(fullPath))) {
+        continue;
+      }
+
+      const content = await readFile(fullPath, "utf8");
+      const mockUsages = extractMockUsages(content, mockPolicy.mockAnnotationTag);
+
+      for (const usage of mockUsages) {
+        if (!usage.reason) {
+          issues.push({
+            path: `/${testFile}:${String(usage.line)}`,
+            message: `Mock call requires annotation '// ${mockPolicy.mockAnnotationTag}: <reason>'.`,
+            code: "workflow_mock_unannotated"
+          });
+          continue;
+        }
+
+        if (!mockPolicy.allowedReasons.has(usage.reason)) {
+          issues.push({
+            path: `/${testFile}:${String(usage.line)}`,
+            message: `Mock annotation reason '${usage.reason}' is not allowed.`,
+            code: "workflow_mock_invalid_reason"
+          });
+          continue;
+        }
+
+        if (usage.reason === "adapter_boundary" && !matchesAnyGlob(testFile, mockPolicy.boundaryGlobs)) {
+          issues.push({
+            path: `/${testFile}:${String(usage.line)}`,
+            message: "adapter_boundary mock annotation is only allowed in adapter-boundary test files.",
+            code: "workflow_mock_boundary_violation"
+          });
+        }
+      }
     }
   }
 

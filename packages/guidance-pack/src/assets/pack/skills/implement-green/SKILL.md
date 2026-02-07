@@ -14,6 +14,8 @@ Default prompt: Implement the smallest change set that turns failing tests green
 ## Instructions
 - Implement domain-first and preserve module boundaries.
 - Avoid introducing any or bypassing lint/type checks.
+- Keep test doubles fake-first; allow mocks only for adapter boundaries and failure simulation.
+- If a mock is unavoidable, annotate call sites with // forge-mock: adapter_boundary or // forge-mock: failure_simulation.
 - Run green and refactor gates after implementation updates.
 - Keep public APIs stable unless the plan explicitly includes a breaking change.
 - Record constraints discovered during implementation in decision notes.

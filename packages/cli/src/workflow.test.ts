@@ -75,6 +75,18 @@ async function initRepo(): Promise<{ repo: string; planPath: string }> {
   return { repo, planPath };
 }
 
+function bddBody(extra = ""): string {
+  return [
+    "describe('x', () => {",
+    "  // Given preconditions",
+    "  // When running behavior",
+    "  // Then expected results",
+    extra,
+    "});",
+    ""
+  ].join("\n");
+}
+
 describe("workflow", () => {
   it("migrates legacy plan files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "forge-plan-migrate-"));
@@ -134,6 +146,71 @@ describe("workflow", () => {
     const { repo, planPath } = await initRepo();
 
     await writeFile(join(repo, "docs", "architecture.md"), "updated\n", "utf8");
+    const result = await runWorkflowCheck(repo, planPath, "HEAD");
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("fails when mock is unannotated", async () => {
+    const { repo, planPath } = await initRepo();
+
+    await writeFile(join(repo, "tests", "a.test.ts"), bddBody("  vi.mock('x', () => ({}));"), "utf8");
+    const result = await runWorkflowCheck(repo, planPath, "HEAD");
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "workflow_mock_unannotated")).toBe(true);
+  });
+
+  it("fails when mock annotation reason is invalid", async () => {
+    const { repo, planPath } = await initRepo();
+
+    await writeFile(
+      join(repo, "tests", "a.test.ts"),
+      bddBody("  // forge-mock: perf_testing\n  vi.mock('x', () => ({}));"),
+      "utf8"
+    );
+    const result = await runWorkflowCheck(repo, planPath, "HEAD");
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "workflow_mock_invalid_reason")).toBe(true);
+  });
+
+  it("fails when adapter_boundary mock is outside allowed boundary paths", async () => {
+    const { repo, planPath } = await initRepo();
+
+    await writeFile(
+      join(repo, "tests", "a.test.ts"),
+      bddBody("  // forge-mock: adapter_boundary\n  vi.mock('x', () => ({}));"),
+      "utf8"
+    );
+    const result = await runWorkflowCheck(repo, planPath, "HEAD");
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "workflow_mock_boundary_violation")).toBe(true);
+  });
+
+  it("passes when failure_simulation mock annotation is present", async () => {
+    const { repo, planPath } = await initRepo();
+
+    await writeFile(
+      join(repo, "tests", "a.test.ts"),
+      bddBody("  // forge-mock: failure_simulation\n  vi.mock('x', () => ({}));"),
+      "utf8"
+    );
+    const result = await runWorkflowCheck(repo, planPath, "HEAD");
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("passes when adapter_boundary mock annotation is in allowed boundary paths", async () => {
+    const { repo, planPath } = await initRepo();
+    await mkdir(join(repo, "apps", "desktop", "src", "composables"), { recursive: true });
+
+    await writeFile(
+      join(repo, "apps", "desktop", "src", "composables", "useControlPlane.test.ts"),
+      bddBody("  // forge-mock: adapter_boundary\n  vi.mock('@tauri-apps/api/core', () => ({ invoke: () => Promise.resolve() }));"),
+      "utf8"
+    );
     const result = await runWorkflowCheck(repo, planPath, "HEAD");
 
     expect(result.valid).toBe(true);

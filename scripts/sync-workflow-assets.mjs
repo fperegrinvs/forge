@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { chmod, lstat, mkdir, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +39,7 @@ function createPolicyHash(policy) {
 function renderAgents(policy) {
   const phases = policy.workflow.phases.join(" -> ");
   const gateCommands = policy.commands.gates;
+  const mockTag = policy.quality.mock_annotation_tag;
 
   return [
     "# Forge AGENTS",
@@ -48,6 +49,7 @@ function renderAgents(policy) {
     "## Required Workflow",
     `- Follow phases in order: ${phases}.`,
     "- Use code-first BDD with Given/When/Then comments in tests.",
+    `- Prefer fakes over mocks. Mocks require annotation (${mockTag}) and are only for adapter_boundary or failure_simulation.`,
     "- Keep modulith boundaries and import restrictions intact.",
     "- Update documentation and decisions together with code changes.",
     "",
@@ -75,14 +77,26 @@ function renderAgentsOverride(policy) {
 }
 
 function renderTestingRule(policy) {
+  const mockTag = policy.quality.mock_annotation_tag;
+  const mockReasons = policy.quality.allow_mocks_only_for.map((reason) => `- ${reason}`).join("\n");
+  const boundaryGlobs = policy.quality.mock_boundary_test_globs.map((glob) => `- ${glob}`).join("\n");
+
   return [
     "# Testing Rules",
     "",
     `- require_bdd: ${String(policy.quality.require_bdd)}`,
     `- require_property_tests: ${String(policy.quality.require_property_tests)}`,
     `- require_contract_tests: ${String(policy.quality.require_contract_tests)}`,
+    `- mock_policy: ${String(policy.quality.mock_policy)}`,
     "",
     "Use code-first BDD in test files with Given/When/Then comments.",
+    "Prefer fakes for test doubles.",
+    "Only use mocks when allowed by policy and annotate each mock call site.",
+    `Annotation format: // ${mockTag}: <reason>`,
+    "Allowed reasons:",
+    mockReasons,
+    "Adapter-boundary reason is allowed only in:",
+    boundaryGlobs,
     `Run gate:spec with: ${policy.commands.gates.spec}`,
     `Run gate:green with: ${policy.commands.gates.green}`,
     `Run gate:refactor with: ${policy.commands.gates.refactor}`,
@@ -208,7 +222,26 @@ function buildExpectedAssets(policy) {
     }
   }
 
-  return { expectedFiles, expectedScripts };
+  const expectedSymlinks = new Map();
+
+  const rootGuidanceLinks = {
+    "AGENTS.md": join(guidanceRoot, "AGENTS.md"),
+    "AGENTS.override.md": join(guidanceRoot, "AGENTS.override.md"),
+    rules: join(guidanceRoot, "rules"),
+    skills: join(guidanceRoot, "skills"),
+    codex: join(guidanceRoot, "codex")
+  };
+
+  for (const [name, targetAbs] of Object.entries(rootGuidanceLinks)) {
+    expectedSymlinks.set(join(repoRoot, name), targetAbs);
+  }
+
+  expectedSymlinks.set(join(repoRoot, "CLAUDE.md"), join(repoRoot, "AGENTS.md"));
+  expectedSymlinks.set(join(repoRoot, ".claude", "CLAUDE.md"), join(repoRoot, "CLAUDE.md"));
+  expectedSymlinks.set(join(repoRoot, ".claude", "skills"), join(repoRoot, "skills"));
+  expectedSymlinks.set(join(repoRoot, ".claude", "rules"), join(repoRoot, "rules"));
+
+  return { expectedFiles, expectedScripts, expectedSymlinks };
 }
 
 async function writeExpected(expectedFiles, expectedScripts) {
@@ -221,6 +254,28 @@ async function writeExpected(expectedFiles, expectedScripts) {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, "utf8");
     await chmod(path, 0o755);
+  }
+}
+
+async function ensureSymlinks(expectedSymlinks) {
+  for (const [linkPath, targetAbs] of expectedSymlinks) {
+    await mkdir(dirname(linkPath), { recursive: true });
+    const expectedTarget = relative(dirname(linkPath), targetAbs);
+    const stat = await lstat(linkPath).catch(() => null);
+
+    if (stat && !stat.isSymbolicLink()) {
+      await rm(linkPath, { recursive: true, force: true });
+    }
+
+    if (stat?.isSymbolicLink()) {
+      const currentTarget = await readlink(linkPath);
+      if (currentTarget === expectedTarget) {
+        continue;
+      }
+      await rm(linkPath, { recursive: true, force: true });
+    }
+
+    await symlink(expectedTarget, linkPath);
   }
 }
 
@@ -257,7 +312,7 @@ async function removeStale(policy, expectedScripts) {
   }
 }
 
-async function collectMismatches(policy, expectedFiles, expectedScripts) {
+async function collectMismatches(policy, expectedFiles, expectedScripts, expectedSymlinks) {
   const mismatches = [];
 
   for (const [path, expectedContent] of [...expectedFiles, ...expectedScripts]) {
@@ -269,6 +324,25 @@ async function collectMismatches(policy, expectedFiles, expectedScripts) {
 
     if (actualContent !== expectedContent) {
       mismatches.push(`outdated: ${path}`);
+    }
+  }
+
+  for (const [linkPath, targetAbs] of expectedSymlinks) {
+    const stat = await lstat(linkPath).catch(() => null);
+    if (!stat) {
+      mismatches.push(`missing symlink: ${linkPath}`);
+      continue;
+    }
+
+    if (!stat.isSymbolicLink()) {
+      mismatches.push(`not a symlink: ${linkPath}`);
+      continue;
+    }
+
+    const actualTarget = await readlink(linkPath);
+    const expectedTarget = relative(dirname(linkPath), targetAbs);
+    if (actualTarget !== expectedTarget) {
+      mismatches.push(`symlink target mismatch: ${linkPath} -> ${actualTarget} (expected ${expectedTarget})`);
     }
   }
 
@@ -306,10 +380,10 @@ async function collectMismatches(policy, expectedFiles, expectedScripts) {
 export async function syncWorkflowAssets({ check = false } = {}) {
   const policyRaw = await readFile(policyPath, "utf8");
   const policy = JSON.parse(policyRaw);
-  const { expectedFiles, expectedScripts } = buildExpectedAssets(policy);
+  const { expectedFiles, expectedScripts, expectedSymlinks } = buildExpectedAssets(policy);
 
   if (check) {
-    const mismatches = await collectMismatches(policy, expectedFiles, expectedScripts);
+    const mismatches = await collectMismatches(policy, expectedFiles, expectedScripts, expectedSymlinks);
     if (mismatches.length > 0) {
       throw new Error(`Workflow assets out of sync:\n${mismatches.join("\n")}`);
     }
@@ -318,6 +392,7 @@ export async function syncWorkflowAssets({ check = false } = {}) {
 
   await writeExpected(expectedFiles, expectedScripts);
   await removeStale(policy, expectedScripts);
+  await ensureSymlinks(expectedSymlinks);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

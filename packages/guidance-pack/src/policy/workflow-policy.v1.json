@@ -13,7 +13,18 @@
     "require_bdd": true,
     "require_property_tests": true,
     "require_contract_tests": true,
-    "require_docs_updates": true
+    "require_docs_updates": true,
+    "mock_policy": "strict_boundary",
+    "allow_mocks_only_for": [
+      "adapter_boundary",
+      "failure_simulation"
+    ],
+    "mock_annotation_tag": "forge-mock",
+    "mock_boundary_test_globs": [
+      "apps/**/*.test.ts",
+      "packages/adapter-*/**/*.test.ts",
+      "packages/**/src/**/*adapter*.test.ts"
+    ]
   },
   "commands": {
     "gates": {
@@ -54,6 +65,7 @@
         "Keep every task small enough for deterministic execution and review.",
         "For each non-documentation task, include at least one code-first BDD scenario.",
         "Describe property and contract tests when applicable; use empty arrays only if not relevant.",
+        "Prefer fakes over mocks in planned tests; reserve mocks for adapter boundaries and failure simulation.",
         "Always include documentation updates and decision notes for each task.",
         "Use verification commands that can run unattended in CI."
       ]
@@ -66,6 +78,8 @@
         "Write failing tests before implementation changes.",
         "Use Given/When/Then comments in test bodies.",
         "Favor behavior-focused assertions over implementation detail coupling.",
+        "Use fakes by default; only use mocks for adapter boundaries or explicit failure simulation.",
+        "When using mocks, annotate each call site with // forge-mock: adapter_boundary or // forge-mock: failure_simulation.",
         "Run the spec gate command after creating tests.",
         "If tests pass before implementation, strengthen the specification."
       ]
@@ -77,6 +91,8 @@
       "instructions": [
         "Implement domain-first and preserve module boundaries.",
         "Avoid introducing any or bypassing lint/type checks.",
+        "Keep test doubles fake-first; allow mocks only for adapter boundaries and failure simulation.",
+        "If a mock is unavoidable, annotate call sites with // forge-mock: adapter_boundary or // forge-mock: failure_simulation.",
         "Run green and refactor gates after implementation updates.",
         "Keep public APIs stable unless the plan explicitly includes a breaking change.",
         "Record constraints discovered during implementation in decision notes."

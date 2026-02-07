@@ -5,6 +5,7 @@ const { invokeMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
+  // forge-mock: adapter_boundary
   invoke: invokeMock
 }));
 

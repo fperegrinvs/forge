@@ -15,5 +15,7 @@ Default prompt: Write failing tests first using Given/When/Then comments and ali
 - Write failing tests before implementation changes.
 - Use Given/When/Then comments in test bodies.
 - Favor behavior-focused assertions over implementation detail coupling.
+- Use fakes by default; only use mocks for adapter boundaries or explicit failure simulation.
+- When using mocks, annotate each call site with // forge-mock: adapter_boundary or // forge-mock: failure_simulation.
 - Run the spec gate command after creating tests.
 - If tests pass before implementation, strengthen the specification.

@@ -40,6 +40,12 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 ## Workflow Enforcement
 
 - Canonical policy: `/Users/simon/projects/forge/packages/guidance-pack/src/policy/workflow-policy.v1.json`
-- Sync generated assets: `npm run workflow:sync`
+- Sync generated assets and repo-level guidance links: `npm run workflow:sync`
 - Verify generated assets are up to date: `npm run workflow:check-sync`
 - Run hard-fail workflow checks for this repo: `npm run workflow:check`
+- Repo-local guidance is exposed via symlinks: `AGENTS.md`, `skills/`, `rules/`, `codex/`.
+- Claude compatibility symlinks are maintained: `CLAUDE.md` and `.claude/{CLAUDE.md,skills,rules}`.
+- Testing policy is fake-first. Mocks are restricted to `adapter_boundary` or `failure_simulation`.
+- Every mock call site must include an adjacent annotation:
+  - `// forge-mock: adapter_boundary`
+  - `// forge-mock: failure_simulation`

@@ -5,6 +5,7 @@ Workflow policy version: 1.0.0
 ## Required Workflow
 - Follow phases in order: spec -> implement -> refactor -> document -> commit.
 - Use code-first BDD with Given/When/Then comments in tests.
+- Prefer fakes over mocks. Mocks require annotation (forge-mock) and are only for adapter_boundary or failure_simulation.
 - Keep modulith boundaries and import restrictions intact.
 - Update documentation and decisions together with code changes.
 
