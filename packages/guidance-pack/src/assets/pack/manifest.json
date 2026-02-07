@@ -2,7 +2,7 @@
   "name": "forge-guidance-pack",
   "version": "1.0.0",
   "workflow_policy_version": "1.1.0",
-  "workflow_policy_hash": "ed4dca4e31a2b092c95e70fd77f32bd98cb415452fab5abbdfd42d34227530f9",
+  "workflow_policy_hash": "549bd6d0cafe9baa0f712742ab0e10ed25bff37349834fe4f0b41a504aebec4e",
   "context": {
     "max_read_bytes": 262144
   },

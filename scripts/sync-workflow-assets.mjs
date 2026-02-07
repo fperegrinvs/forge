@@ -8,6 +8,7 @@ const repoRoot = resolve(scriptDir, "..");
 const policyPath = join(repoRoot, "packages", "guidance-pack", "src", "policy", "workflow-policy.v1.json");
 const guidanceRoot = join(repoRoot, "packages", "guidance-pack", "src", "assets", "pack");
 const checksRoot = join(repoRoot, "checks", "task-types");
+const referencesRoot = join(repoRoot, "packages", "guidance-pack", "src", "references");
 
 function canonicalize(value) {
   if (Array.isArray(value)) {
@@ -96,35 +97,45 @@ function renderTestingRule(policy) {
   const mockTag = policy.quality.mock_annotation_tag;
   const mockReasons = policy.quality.allow_mocks_only_for.map((reason) => `- ${reason}`).join("\n");
   const boundaryGlobs = policy.quality.mock_boundary_test_globs.map((glob) => `- ${glob}`).join("\n");
-  const gateCommands = policy.commands.gates;
-  const gateLines = [
-    `Run gate:spec with: ${gateCommands.spec}`,
-    `Run gate:green with: ${gateCommands.green}`
-  ];
-
-  if (gateCommands.architecture) {
-    gateLines.push(`Run gate:architecture with: ${gateCommands.architecture}`);
-  }
-
-  gateLines.push(`Run gate:refactor with: ${gateCommands.refactor}`);
-
   const thresholds = policy.quality.coverage_thresholds;
-  const coverageSection =
-    thresholds && gateCommands.coverage
-      ? [
-          "## Coverage",
-          "",
-          "Coverage is required and enforced in CI.",
-          `Run gate:coverage with: ${gateCommands.coverage}`,
-          "",
-          "Minimum thresholds:",
-          `- lines: ${String(thresholds.lines)}%`,
-          `- statements: ${String(thresholds.statements)}%`,
-          `- functions: ${String(thresholds.functions)}%`,
-          `- branches: ${String(thresholds.branches)}%`,
-          ""
-        ]
-      : [];
+  const coverageSection = thresholds
+    ? [
+        "",
+        "## Coverage",
+        "",
+        "Coverage is required and enforced in CI.",
+        "",
+        "Minimum thresholds:",
+        `- lines: ${String(thresholds.lines)}%`,
+        `- statements: ${String(thresholds.statements)}%`,
+        `- functions: ${String(thresholds.functions)}%`,
+        `- branches: ${String(thresholds.branches)}%`,
+        ""
+      ]
+    : [];
+
+  const taxonomy = policy.quality.property_test_taxonomy;
+  const taxonomySection = taxonomy
+    ? [
+        "",
+        "## Property-Based Test Taxonomy",
+        "",
+        ...taxonomy.map((entry) => `- ${entry}`),
+        ""
+      ]
+    : [];
+
+  const patterns = policy.quality.testing_patterns;
+  const patternsSection = patterns
+    ? [
+        "",
+        "## Testing Patterns",
+        "",
+        `- ${patterns.black_box}`,
+        `- ${patterns.build_test_app}`,
+        ""
+      ]
+    : [];
 
   return [
     "# Testing Rules",
@@ -142,19 +153,108 @@ function renderTestingRule(policy) {
     mockReasons,
     "Adapter-boundary reason is allowed only in:",
     boundaryGlobs,
-    ...gateLines,
-    ...(coverageSection.length > 0 ? ["", ...coverageSection] : []),
+    ...coverageSection,
+    ...taxonomySection,
+    ...patternsSection,
     ""
   ].join("\n");
 }
 
-function renderArchitectureRule() {
+function renderArchitectureRule(policy) {
+  const arch = policy.architecture;
+
+  if (!arch) {
+    return [
+      "# Architecture Rules",
+      "",
+      "- Follow modulith module boundaries and import restrictions.",
+      "- Keep dependencies pointing inward: domain does not import infrastructure.",
+      "- Keep public module API in index.ts and route registration in routes.ts.",
+      ""
+    ].join("\n");
+  }
+
+  const layoutLines = arch.module_layout.map((entry) => `- ${entry}`);
+
   return [
     "# Architecture Rules",
     "",
-    "- Follow modulith module boundaries and import restrictions.",
-    "- Keep dependencies pointing inward: domain does not import infrastructure.",
-    "- Keep public module API in index.ts and route registration in routes.ts.",
+    "## Module Layout",
+    "",
+    "Every module directory contains:",
+    "",
+    ...layoutLines,
+    "",
+    "## Dependency Direction",
+    "",
+    `\`${arch.dependency_direction}\``,
+    "",
+    `${arch.barrel_export_rule}.`,
+    "",
+    "## DI Pattern",
+    "",
+    `${arch.di_pattern}.`,
+    "",
+    "## Route Pattern",
+    "",
+    `${arch.route_pattern}.`,
+    "",
+    "## Shared Types",
+    "",
+    `${arch.shared_types}.`,
+    ""
+  ].join("\n");
+}
+
+function renderStackRule(policy) {
+  const stack = policy.stack;
+
+  if (!stack) {
+    return null;
+  }
+
+  const techEntries = [
+    ["Runtime", stack.runtime],
+    ["Language", stack.language],
+    ["Backend", stack.backend],
+    ["DI", stack.di],
+    ["Validation", stack.validation],
+    ["Frontend", stack.frontend],
+    ["Bundler", stack.bundler],
+    ["Testing", stack.testing]
+  ];
+
+  const techLines = techEntries.map(([key, value]) => `| ${key} | ${value} |`);
+  const antiPatternLines = stack.anti_patterns.map((entry) => `- ${entry}`);
+
+  return [
+    "# Stack",
+    "",
+    "| Layer | Technology |",
+    "|-------|-----------|",
+    ...techLines,
+    "",
+    `**Serving model**: ${stack.serving_model}`,
+    "",
+    "## Do Not Use",
+    "",
+    ...antiPatternLines,
+    ""
+  ].join("\n");
+}
+
+function renderProjectRule(policy) {
+  const project = policy.project;
+  const packageLines = project.key_packages.map((pkg) => `- ${pkg}`).join("\n");
+  return [
+    "# Project Context",
+    "",
+    `**${project.name}**: ${project.description}`,
+    "",
+    `**Architecture**: ${project.architecture}`,
+    "",
+    "## Key Packages",
+    packageLines,
     ""
   ].join("\n");
 }
@@ -167,7 +267,6 @@ function renderDocumentationRule(policy) {
     `- require_docs_updates: ${String(policy.quality.require_docs_updates)}`,
     "- Update docs whenever implementation changes behavior or interfaces.",
     "- Record rationale in decision notes and decisions.md.",
-    `Run gate:docs with: ${policy.commands.gates.docs}`,
     "",
     "Allowed documentation update globs:",
     allowed,
@@ -212,7 +311,7 @@ async function listFiles(rootDir) {
   return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
 }
 
-function buildExpectedAssets(policy) {
+async function buildExpectedAssets(policy) {
   const policyHash = createPolicyHash(policy);
 
   const manifest = {
@@ -242,13 +341,30 @@ function buildExpectedAssets(policy) {
   expectedFiles.set(join(guidanceRoot, "AGENTS.md"), renderAgents(policy));
   expectedFiles.set(join(guidanceRoot, "AGENTS.override.md"), renderAgentsOverride(policy));
   expectedFiles.set(join(guidanceRoot, "rules", "testing.md"), renderTestingRule(policy));
-  expectedFiles.set(join(guidanceRoot, "rules", "architecture.md"), renderArchitectureRule());
+  expectedFiles.set(join(guidanceRoot, "rules", "architecture.md"), renderArchitectureRule(policy));
+  expectedFiles.set(join(guidanceRoot, "rules", "project.md"), renderProjectRule(policy));
+
+  const stackContent = renderStackRule(policy);
+  if (stackContent) {
+    expectedFiles.set(join(guidanceRoot, "rules", "stack.md"), stackContent);
+  }
   expectedFiles.set(join(guidanceRoot, "rules", "documentation.md"), renderDocumentationRule(policy));
   expectedFiles.set(join(guidanceRoot, "manifest.json"), toPrettyJson(manifest));
   expectedFiles.set(join(guidanceRoot, "codex", "config.json"), toPrettyJson(codexConfig));
 
   for (const skill of policy.skills) {
     expectedFiles.set(join(guidanceRoot, "skills", skill.name, "SKILL.md"), renderSkill(skill, policy));
+  }
+
+  const referenceMap = policy.reference_map ?? {};
+  for (const [skillName, refFiles] of Object.entries(referenceMap)) {
+    for (const refFile of refFiles) {
+      const sourcePath = join(referencesRoot, refFile);
+      const content = await readFile(sourcePath, "utf8").catch(() => null);
+      if (content !== null) {
+        expectedFiles.set(join(guidanceRoot, "skills", skillName, "references", refFile), content);
+      }
+    }
   }
 
   const expectedScripts = new Map();
@@ -281,7 +397,6 @@ function buildExpectedAssets(policy) {
   }
 
   expectedSymlinks.set(join(repoRoot, "CLAUDE.md"), join(repoRoot, "AGENTS.md"));
-  expectedSymlinks.set(join(repoRoot, ".claude", "CLAUDE.md"), join(repoRoot, "CLAUDE.md"));
   expectedSymlinks.set(join(repoRoot, ".claude", "skills"), join(repoRoot, "skills"));
   expectedSymlinks.set(join(repoRoot, ".claude", "rules"), join(repoRoot, "rules"));
 
@@ -323,13 +438,22 @@ async function ensureSymlinks(expectedSymlinks) {
   }
 }
 
-async function removeStale(policy, expectedScripts) {
+async function removeStale(policy, expectedFiles, expectedScripts) {
   const skillsDir = join(guidanceRoot, "skills");
   const expectedSkillNames = new Set(policy.skills.map((skill) => skill.name));
 
   for (const dirName of await listDirectories(skillsDir)) {
     if (!expectedSkillNames.has(dirName)) {
       await rm(join(skillsDir, dirName), { recursive: true, force: true });
+      continue;
+    }
+
+    const refsDir = join(skillsDir, dirName, "references");
+    for (const fileName of await listFiles(refsDir)) {
+      const fullPath = join(refsDir, fileName);
+      if (!expectedFiles.has(fullPath)) {
+        await rm(fullPath, { force: true });
+      }
     }
   }
 
@@ -396,6 +520,15 @@ async function collectMismatches(policy, expectedFiles, expectedScripts, expecte
   for (const dirName of await listDirectories(skillsDir)) {
     if (!expectedSkillNames.has(dirName)) {
       mismatches.push(`unexpected skill directory: ${join(skillsDir, dirName)}`);
+      continue;
+    }
+
+    const refsDir = join(skillsDir, dirName, "references");
+    for (const fileName of await listFiles(refsDir)) {
+      const fullPath = join(refsDir, fileName);
+      if (!expectedFiles.has(fullPath)) {
+        mismatches.push(`unexpected reference file: ${fullPath}`);
+      }
     }
   }
 
@@ -424,7 +557,7 @@ async function collectMismatches(policy, expectedFiles, expectedScripts, expecte
 export async function syncWorkflowAssets({ check = false } = {}) {
   const policyRaw = await readFile(policyPath, "utf8");
   const policy = JSON.parse(policyRaw);
-  const { expectedFiles, expectedScripts, expectedSymlinks } = buildExpectedAssets(policy);
+  const { expectedFiles, expectedScripts, expectedSymlinks } = await buildExpectedAssets(policy);
 
   if (check) {
     const mismatches = await collectMismatches(policy, expectedFiles, expectedScripts, expectedSymlinks);
@@ -435,7 +568,7 @@ export async function syncWorkflowAssets({ check = false } = {}) {
   }
 
   await writeExpected(expectedFiles, expectedScripts);
-  await removeStale(policy, expectedScripts);
+  await removeStale(policy, expectedFiles, expectedScripts);
   await ensureSymlinks(expectedSymlinks);
 }
 

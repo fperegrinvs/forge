@@ -1,5 +1,52 @@
 {
   "version": "1.1.0",
+  "project": {
+    "name": "Forge",
+    "description": "Spec-driven development system powered by AI agents. Plan → Execute → Verify with quality gates at every step.",
+    "architecture": "TypeScript modulith on Bun. Monorepo with packages/ (domain libraries, adapters, CLI) and apps/ (desktop UI).",
+    "key_packages": [
+      "contracts - Plan schema and validation (JSON Schema 2020-12)",
+      "guidance-pack - Workflow policy, rules, and skills (generated assets)",
+      "check-runner - Task-type gate execution",
+      "control-plane - Plan lifecycle orchestration",
+      "adapter-claude / adapter-codex - Agent runtime adapters",
+      "cli - Public forge CLI commands",
+      "templates - Project and module scaffolding"
+    ]
+  },
+  "stack": {
+    "runtime": "Bun",
+    "language": "TypeScript (strict, no decorators)",
+    "backend": "Fastify",
+    "di": "awilix (scoped containers)",
+    "validation": "Zod",
+    "frontend": "Vue 3.5 + Vuetify",
+    "bundler": "Vite",
+    "testing": "Vitest + fast-check",
+    "serving_model": "Single-origin SPA: Fastify serves API routes + Vite build output",
+    "anti_patterns": [
+      "Do not use Tailwind — Vuetify handles component styling",
+      "Do not use Nuxt or SSR — single-origin SPA only",
+      "Do not use Bun-native APIs (Bun.serve, Bun.file) — use Node-compatible APIs for portability",
+      "Do not use decorators — use plain functions and constructor injection",
+      "Do not use `any` — use `unknown` with type narrowing"
+    ]
+  },
+  "architecture": {
+    "module_layout": [
+      "index.ts — barrel exports of public API only",
+      "routes.ts — default-exports RouteRegistrar (Fastify plugin)",
+      "container.ts — exports registerXModule(container) for DI registration",
+      "services/ — business logic classes with constructor injection",
+      "domain/ — types, schemas, validation; no infrastructure imports",
+      "infrastructure/ — repository implementations, external adapters"
+    ],
+    "dependency_direction": "infrastructure/ → services/ → domain/ (never reverse)",
+    "barrel_export_rule": "Cross-module imports go through index.ts only",
+    "di_pattern": "registerXModule(container) in container.ts, called from composition root; use asClass().scoped() for request-scoped services",
+    "route_pattern": "routes.ts default-exports RouteRegistrar (async Fastify plugin); resolve services via diScope",
+    "shared_types": "Framework contracts (RouteRegistrar) in shared/types.ts; module types via barrel exports"
+  },
   "workflow": {
     "phases": [
       "spec",
@@ -30,7 +77,18 @@
       "apps/**/*.test.ts",
       "packages/adapter-*/**/*.test.ts",
       "packages/**/src/**/*adapter*.test.ts"
-    ]
+    ],
+    "property_test_taxonomy": [
+      "round-trip — encode then decode returns original",
+      "idempotence — applying operation twice equals applying once",
+      "invariant — property holds for all valid inputs",
+      "oracle — compare implementation against simple reference",
+      "no-invalid-state — constructor/factory never produces invalid state"
+    ],
+    "testing_patterns": {
+      "black_box": "Test public interfaces at every level; avoid reaching into private implementation",
+      "build_test_app": "Use buildTestApp() to create a configured Fastify instance for integration tests"
+    }
   },
   "commands": {
     "gates": {
@@ -65,6 +123,12 @@
         "docs"
       ]
     }
+  },
+  "reference_map": {
+    "implement-green": ["code-patterns.md"],
+    "spec-bdd": ["test-patterns.md"],
+    "plan-author": ["architecture-guide.md"],
+    "document-and-decide": ["documentation-standards.md"]
   },
   "skills": [
     {
