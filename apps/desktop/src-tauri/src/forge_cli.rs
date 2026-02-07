@@ -36,10 +36,29 @@ fn resolve_forge_command(app: &AppHandle) -> (PathBuf, Vec<String>) {
   (PathBuf::from("forge"), vec![])
 }
 
+fn augmented_path() -> String {
+  let current = std::env::var("PATH").unwrap_or_default();
+  let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+  // GUI apps on macOS don't inherit the user's shell PATH.
+  // Prepend common tool directories so gate scripts can find bun, cargo, etc.
+  let extras = [
+    format!("{home}/.bun/bin"),
+    format!("{home}/.cargo/bin"),
+    format!("{home}/.local/bin"),
+    "/usr/local/bin".to_string(),
+  ];
+  let mut parts: Vec<String> = extras.into_iter().filter(|p| std::path::Path::new(p).is_dir()).collect();
+  if !current.is_empty() {
+    parts.push(current);
+  }
+  parts.join(":")
+}
+
 pub fn run_forge_json(app: &AppHandle, cwd: &Path, args: &[String]) -> Result<serde_json::Value, String> {
   let (bin, base_args) = resolve_forge_command(app);
   let output = Command::new(&bin)
     .current_dir(cwd)
+    .env("PATH", augmented_path())
     .args(base_args)
     .args(args)
     .output()
