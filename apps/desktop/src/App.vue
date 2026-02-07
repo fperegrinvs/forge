@@ -25,6 +25,23 @@
                 <v-card class="pa-4 mb-4">
                   <v-text-field v-model="projectRoot" label="Project root" density="comfortable" />
                   <v-text-field v-model="planPath" label="Plan path (relative to project root)" density="comfortable" />
+
+                  <div v-if="discoveredPlans.length" class="mb-3">
+                    <div class="text-subtitle-2 mb-1">Discovered Plans</div>
+                    <v-chip-group>
+                      <v-chip
+                        v-for="plan in discoveredPlans"
+                        :key="plan.filename"
+                        :color="plan.validating ? 'grey' : plan.valid === true ? 'success' : plan.valid === false ? 'error' : 'grey'"
+                        :prepend-icon="plan.validating ? 'mdi-loading mdi-spin' : plan.valid === true ? 'mdi-check-circle' : plan.valid === false ? 'mdi-close-circle' : 'mdi-help-circle'"
+                        variant="tonal"
+                        @click="onSelectPlan(plan)"
+                      >
+                        {{ plan.filename }}
+                      </v-chip>
+                    </v-chip-group>
+                  </div>
+
                   <v-select v-model="adapter" :items="['codex', 'claude']" label="Adapter" density="comfortable" />
 
                   <div class="d-flex flex-wrap ga-2">
@@ -55,6 +72,19 @@
                   <p><strong>ID:</strong> {{ current.taskId || "-" }}</p>
                   <p><strong>Status:</strong> {{ current.state || "-" }}</p>
                   <p><strong>Message:</strong> {{ current.message || "-" }}</p>
+                </v-card>
+
+                <v-card v-if="selectedPlanStatuses.length" class="pa-4 mb-4">
+                  <h2 class="text-h6 mb-2">Task Status</h2>
+                  <v-list density="compact">
+                    <v-list-item
+                      v-for="ts in selectedPlanStatuses"
+                      :key="ts.id"
+                      :prepend-icon="ts.state === 'completed' ? 'mdi-check-circle' : ts.state === 'running' ? 'mdi-play-circle' : ts.state === 'failed' ? 'mdi-alert-circle' : ts.state === 'paused' ? 'mdi-pause-circle' : 'mdi-clock-outline'"
+                      :title="ts.id"
+                      :subtitle="ts.state"
+                    />
+                  </v-list>
                 </v-card>
 
                 <v-card class="pa-4 mb-4">
@@ -153,7 +183,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import CreateProjectDialog from "./components/CreateProjectDialog.vue";
 import NewPlanDialog from "./components/NewPlanDialog.vue";
 import PlanGraph from "./components/PlanGraph.vue";
@@ -163,13 +193,17 @@ import {
   packsDownload,
   packsListInstalled,
   planValidate,
+  plansList,
+  plansStatus,
   projectGetGuidanceStatus,
   projectInstallGuidance,
   resumeRun,
   runNext,
   type InstalledPack,
+  type PlanFileEntry,
   type ProjectGuidanceStatus,
-  type RunNextResult
+  type RunNextResult,
+  type TaskStatus
 } from "./composables/useControlPlane";
 
 const tab = ref<"orchestrate" | "packs">("orchestrate");
@@ -196,10 +230,22 @@ const current = reactive<RunNextResult>({
   message: "Not started"
 });
 
-const tasks = ref([
-  { id: "task-1", dependencies: [] },
-  { id: "task-2", dependencies: ["task-1"] }
-]);
+type DiscoveredPlan = {
+  filename: string;
+  path: string;
+  valid: boolean | null;
+  validating: boolean;
+  taskStatuses: TaskStatus[];
+};
+
+const discoveredPlans = ref<DiscoveredPlan[]>([]);
+const tasks = ref<{ id: string; dependencies: string[] }[]>([]);
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+const selectedPlanStatuses = computed(() => {
+  const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
+  return selected?.taskStatuses ?? [];
+});
 
 onMounted(async () => {
   try {
@@ -213,6 +259,111 @@ onMounted(async () => {
     packLogs.value.unshift(`Startup pack load error: ${String(error)}`);
   }
 });
+
+async function pollPlans(): Promise<void> {
+  try {
+    const entries: PlanFileEntry[] = await plansList(projectRoot.value);
+    const existing = new Map(discoveredPlans.value.map((p) => [p.filename, p]));
+    const updated: DiscoveredPlan[] = entries.map((entry) => {
+      const prev = existing.get(entry.filename);
+      if (prev) return prev;
+      return { filename: entry.filename, path: entry.path, valid: null, validating: false, taskStatuses: [] };
+    });
+    discoveredPlans.value = updated;
+
+    // Auto-validate new plans
+    for (const plan of updated) {
+      if (plan.valid === null && !plan.validating) {
+        plan.validating = true;
+        planValidate(projectRoot.value, plan.path)
+          .then((r) => {
+            plan.valid = r.valid;
+          })
+          .catch(() => {
+            plan.valid = false;
+          })
+          .finally(() => {
+            plan.validating = false;
+          });
+      }
+    }
+
+    // Fetch task statuses for the selected plan
+    if (planPath.value) {
+      try {
+        const status = await plansStatus(projectRoot.value, planPath.value);
+        const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
+        if (selected) selected.taskStatuses = status.tasks;
+      } catch {
+        // status polling is best-effort
+      }
+    }
+  } catch {
+    // polling is best-effort
+  }
+}
+
+function startPolling(): void {
+  stopPolling();
+  pollPlans();
+  pollInterval = setInterval(pollPlans, 5000);
+}
+
+function stopPolling(): void {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+watch(tab, (newTab) => {
+  if (newTab === "orchestrate") {
+    startPolling();
+  } else {
+    stopPolling();
+  }
+});
+
+onUnmounted(() => {
+  stopPolling();
+});
+
+// Start polling if we're on the orchestrate tab initially
+onMounted(() => {
+  if (tab.value === "orchestrate") {
+    startPolling();
+  }
+});
+
+function onSelectPlan(plan: DiscoveredPlan): void {
+  planPath.value = plan.path;
+  logs.value.unshift(`Selected plan: ${plan.filename}`);
+
+  // Load the plan JSON to populate the DAG
+  fetch(plan.path)
+    .then((r) => r.json())
+    .then((json: unknown) => {
+      const planJson = json as { tasks?: { id: string; dependencies: string[] }[] };
+      if (Array.isArray(planJson.tasks)) {
+        tasks.value = planJson.tasks.map((t) => ({
+          id: t.id,
+          dependencies: Array.isArray(t.dependencies) ? t.dependencies : []
+        }));
+      }
+    })
+    .catch(() => {
+      logs.value.unshift("Could not parse plan for DAG");
+    });
+
+  // Fetch task statuses
+  plansStatus(projectRoot.value, plan.path)
+    .then((status) => {
+      plan.taskStatuses = status.tasks;
+    })
+    .catch(() => {
+      // best-effort
+    });
+}
 
 function onProjectCreated(newProjectRoot: string): void {
   projectRoot.value = newProjectRoot;

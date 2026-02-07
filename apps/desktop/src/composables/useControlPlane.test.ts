@@ -12,6 +12,8 @@ import {
   packsListInstalled,
   pauseRun,
   planValidate,
+  plansList,
+  plansStatus,
   projectGetGuidanceStatus,
   projectInit,
   projectInstallGuidance,
@@ -192,6 +194,50 @@ describe("useControlPlane", () => {
     const result = await selectFolder();
     // Then it returns null
     expect(result).toBeNull();
+  });
+
+  it("plansList calls GET /api/plans/list and returns PlanFileEntry[]", async () => {
+    // Given the backend returns a list of plan files
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { filename: "add-auth.json", path: "/project/plans/add-auth.json" },
+        { filename: "fix-bug.json", path: "/project/plans/fix-bug.json" }
+      ]
+    });
+    // When plansList is called
+    const result = await plansList("/project");
+    // Then it calls GET /api/plans/list with projectRoot query param and returns entries
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://localhost:1420/api/plans/list?projectRoot=%2Fproject");
+    expect(init?.method).toBe("GET");
+    expect(result).toHaveLength(2);
+    expect(result[0]!.filename).toBe("add-auth.json");
+    expect(result[1]!.path).toBe("/project/plans/fix-bug.json");
+  });
+
+  it("plansStatus calls GET /api/plans/status and returns PlanStatusResult", async () => {
+    // Given the backend returns task statuses
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tasks: [
+          { id: "task-1", state: "completed" },
+          { id: "task-2", state: "pending" }
+        ]
+      })
+    });
+    // When plansStatus is called
+    const result = await plansStatus("/project", "plans/add-auth.json");
+    // Then it calls GET /api/plans/status with projectRoot and planPath query params
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://localhost:1420/api/plans/status?projectRoot=%2Fproject&planPath=plans%2Fadd-auth.json");
+    expect(init?.method).toBe("GET");
+    expect(result.tasks).toHaveLength(2);
+    expect(result.tasks[0]!.id).toBe("task-1");
+    expect(result.tasks[0]!.state).toBe("completed");
   });
 
   it("calls pause and resume", async () => {

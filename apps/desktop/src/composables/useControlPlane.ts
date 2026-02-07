@@ -158,6 +158,23 @@ export async function selectFolder(): Promise<string | null> {
   return result.path;
 }
 
+export type PlanFileEntry = { filename: string; path: string };
+export type TaskStatus = { id: string; state: string };
+export type PlanStatusResult = { tasks: TaskStatus[] };
+
+export async function plansList(projectRoot: string): Promise<PlanFileEntry[]> {
+  const url = new URL("/api/plans/list", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  return await apiJson<PlanFileEntry[]>(url.toString(), { method: "GET" });
+}
+
+export async function plansStatus(projectRoot: string, planPath: string): Promise<PlanStatusResult> {
+  const url = new URL("/api/plans/status", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  url.searchParams.set("planPath", planPath);
+  return await apiJson<PlanStatusResult>(url.toString(), { method: "GET" });
+}
+
 export async function pauseRun(runId: string): Promise<boolean> {
   return await apiJson<boolean>("/api/run/pause", {
     method: "POST",

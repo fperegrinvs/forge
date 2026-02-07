@@ -591,6 +591,116 @@ async fn select_folder() -> Json<SelectFolderResult> {
     })
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlansListQuery {
+    project_root: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanFileEntry {
+    filename: String,
+    path: String,
+}
+
+async fn plans_list(
+    Query(query): Query<PlansListQuery>,
+) -> Result<Json<Vec<PlanFileEntry>>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let plans_dir = PathBuf::from(&query.project_root).join("plans");
+        if !plans_dir.exists() {
+            return Ok::<_, String>(vec![]);
+        }
+        let mut entries = Vec::new();
+        let read_dir = std::fs::read_dir(&plans_dir)
+            .map_err(|e| format!("read plans dir: {e}"))?;
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    entries.push(PlanFileEntry {
+                        filename: filename.to_string(),
+                        path: path.to_string_lossy().to_string(),
+                    });
+                }
+            }
+        }
+        entries.sort_by(|a, b| a.filename.cmp(&b.filename));
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanStatusQuery {
+    project_root: String,
+    plan_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskStatus {
+    id: String,
+    state: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanStatusResult {
+    tasks: Vec<TaskStatus>,
+}
+
+async fn plans_status(
+    Query(query): Query<PlanStatusQuery>,
+) -> Result<Json<PlanStatusResult>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state_path = PathBuf::from(&query.project_root).join(".forge").join("state.json");
+        if !state_path.exists() {
+            return Ok::<_, String>(PlanStatusResult { tasks: vec![] });
+        }
+        let raw = std::fs::read_to_string(&state_path)
+            .map_err(|e| format!("read state.json: {e}"))?;
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("parse state.json: {e}"))?;
+
+        // state.json may scope by plan path: look for tasks under the plan key or at top level
+        let tasks_value = value
+            .get(&query.plan_path)
+            .and_then(|v| v.get("tasks"))
+            .or_else(|| value.get("tasks"));
+
+        let mut tasks = Vec::new();
+        if let Some(tasks_obj) = tasks_value.and_then(|v| v.as_object()) {
+            for (id, task_val) in tasks_obj {
+                let state = task_val
+                    .get("state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("pending")
+                    .to_string();
+                tasks.push(TaskStatus {
+                    id: id.clone(),
+                    state,
+                });
+            }
+        }
+        tasks.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(PlanStatusResult { tasks })
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
 async fn pause_run(Json(_body): Json<serde_json::Value>) -> impl IntoResponse {
     // v1: pause is filesystem-mediated via the control-plane state; CLI pause isn't exposed yet.
     Json(true)
@@ -786,6 +896,8 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/project/install-guidance", post(project_install_guidance))
         .route("/api/templates", get(list_templates))
         .route("/api/project/init", post(project_init))
+        .route("/api/plans/list", get(plans_list))
+        .route("/api/plans/status", get(plans_status))
         .route("/api/dialog/select-folder", get(select_folder))
         .route("/api/terminal/spawn", post(terminal_spawn))
         .route("/api/terminal/:id", delete(terminal_kill))
