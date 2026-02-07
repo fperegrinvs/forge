@@ -10,6 +10,8 @@ Default prompt: Update docs and decision notes so they accurately describe imple
 ## Workflow
 - Follow phases: spec -> implement -> refactor -> document -> commit.
 - Keep changes deterministic and aligned with policy gates.
+- Each phase ends with its gate passing AND a commit.
+- Do not advance to the next phase until the gate passes (except diagnostic gates).
 
 ## Instructions
 - Update affected docs files and keep wording implementation-accurate.

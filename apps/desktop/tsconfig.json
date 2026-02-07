@@ -1,8 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src",
+    // This is an application bundle built by Vite into `dist/`.
+    // Avoid `tsc -b` emitting JS/d.ts into the same folder (it breaks Tauri's `frontendDist`).
+    "noEmit": true,
     "types": ["node", "vitest/globals"],
     "lib": ["ES2022", "DOM"]
   },

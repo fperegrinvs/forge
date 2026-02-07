@@ -4,14 +4,15 @@
   "version": "0.1.0",
   "identifier": "dev.forge.desktop",
   "build": {
-    "beforeDevCommand": "bun run --cwd .. dev",
-    "beforeBuildCommand": "bun run --cwd .. build",
-    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun --cwd .. run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
+        "url": "http://127.0.0.1:1420/",
         "title": "Forge Desktop",
         "width": 1400,
         "height": 900

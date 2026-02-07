@@ -61,13 +61,15 @@ function renderAgents(policy) {
     `- gate:verify -> ${gateCommands.verify}`
   );
 
-  return [
+  const sections = [
     "# Forge AGENTS",
     "",
     `Workflow policy version: ${policy.version}`,
     "",
     "## Required Workflow",
     `- Follow phases in order: ${phases}.`,
+    "- Each phase ends with its gate passing AND a commit. No silent phase transitions.",
+    "- Do not advance to the next phase until the gate passes (except diagnostic gates).",
     "- Before starting work: fetch latest (`git fetch origin`) and rebase onto `origin/main`.",
     "- Use code-first BDD with Given/When/Then comments in tests.",
     `- Prefer fakes over mocks. Mocks require annotation (${mockTag}) and are only for adapter_boundary or failure_simulation.`,
@@ -76,9 +78,36 @@ function renderAgents(policy) {
     "- Never commit or push directly to `main`. Work on a `codex/*` branch and open a PR.",
     "",
     "## Canonical Gates",
-    ...gateLines,
-    ""
-  ].join("\n");
+    ...gateLines
+  ];
+
+  const discipline = policy.workflow.discipline;
+  if (discipline) {
+    sections.push(
+      "",
+      `## ${discipline.method}`,
+      "",
+      ...discipline.rules.map((rule) => `- ${rule}`)
+    );
+  }
+
+  const phaseGates = policy.workflow.phase_gates;
+  if (phaseGates) {
+    sections.push(
+      "",
+      "## Phase → Gate → Commit",
+      "",
+      "| Phase | Gate | Commit | Diagnostic |",
+      "|-------|------|--------|------------|",
+      ...Object.entries(phaseGates).map(([phase, cfg]) =>
+        `| ${phase} | ${cfg.gate} | ${cfg.commit ? "yes" : "no"} | ${cfg.diagnostic ? "yes" : "no"} |`
+      )
+    );
+  }
+
+  sections.push("");
+
+  return sections.join("\n");
 }
 
 function renderAgentsOverride(policy) {
@@ -274,8 +303,62 @@ function renderDocumentationRule(policy) {
   ].join("\n");
 }
 
+function renderWorkflowRule(policy) {
+  const phases = policy.workflow.phases.join(" -> ");
+  const discipline = policy.workflow.discipline;
+  const phaseGates = policy.workflow.phase_gates;
+
+  const sections = [
+    "# Workflow Discipline",
+    "",
+    `Phases: ${phases}`,
+    ""
+  ];
+
+  if (discipline) {
+    sections.push(
+      `## ${discipline.method}`,
+      "",
+      ...discipline.rules.map((rule) => `- ${rule}`),
+      ""
+    );
+  }
+
+  if (phaseGates) {
+    sections.push(
+      "## Phase → Gate → Commit",
+      "",
+      "| Phase | Gate | Commit | Prefix | Diagnostic |",
+      "|-------|------|--------|--------|------------|",
+      ...Object.entries(phaseGates).map(([phase, cfg]) =>
+        `| ${phase} | ${cfg.gate} | ${cfg.commit ? "yes" : "no"} | ${cfg.prefix ?? "—"} | ${cfg.diagnostic ? "yes" : "no"} |`
+      ),
+      "",
+      "- **Diagnostic gate**: run for observation (confirm red), not as a pass/fail blocker.",
+      "- **Non-diagnostic gate**: MUST pass before committing and advancing.",
+      "- **Commit**: create a commit with the phase prefix after the gate passes.",
+      ""
+    );
+  }
+
+  return sections.join("\n");
+}
+
 function renderSkill(skill, policy) {
   const instructionLines = skill.instructions.map((line) => `- ${line}`);
+  const phaseGates = policy.workflow.phase_gates;
+
+  const workflowLines = [
+    `- Follow phases: ${policy.workflow.phases.join(" -> ")}.`,
+    "- Keep changes deterministic and aligned with policy gates."
+  ];
+
+  if (phaseGates) {
+    workflowLines.push(
+      "- Each phase ends with its gate passing AND a commit.",
+      "- Do not advance to the next phase until the gate passes (except diagnostic gates)."
+    );
+  }
 
   return [
     "---",
@@ -288,8 +371,7 @@ function renderSkill(skill, policy) {
     `Default prompt: ${skill.default_prompt}`,
     "",
     "## Workflow",
-    `- Follow phases: ${policy.workflow.phases.join(" -> ")}.`,
-    "- Keep changes deterministic and aligned with policy gates.",
+    ...workflowLines,
     "",
     "## Instructions",
     ...instructionLines,
@@ -349,6 +431,7 @@ async function buildExpectedAssets(policy) {
     expectedFiles.set(join(guidanceRoot, "rules", "stack.md"), stackContent);
   }
   expectedFiles.set(join(guidanceRoot, "rules", "documentation.md"), renderDocumentationRule(policy));
+  expectedFiles.set(join(guidanceRoot, "rules", "workflow.md"), renderWorkflowRule(policy));
   expectedFiles.set(join(guidanceRoot, "manifest.json"), toPrettyJson(manifest));
   expectedFiles.set(join(guidanceRoot, "codex", "config.json"), toPrettyJson(codexConfig));
 

@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn()
-}));
-
-vi.mock("@tauri-apps/api/core", () => ({
-  // forge-mock: adapter_boundary
-  invoke: invokeMock
+const { fetchMock } = vi.hoisted(() => ({
+  fetchMock: vi.fn()
 }));
 
 import {
@@ -24,42 +19,68 @@ import {
 
 describe("useControlPlane", () => {
   beforeEach(() => {
-    invokeMock.mockReset();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    // URL() uses window.location in the composable.
+    vi.stubGlobal("window", { location: { origin: "http://localhost:1420" } });
   });
 
   it("calls plan_validate", async () => {
     // Given the backend returns a valid result
-    invokeMock.mockResolvedValue({ valid: true, issues: [] });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ valid: true, issues: [] })
+    });
     // When plan validation is requested
     const result = await planValidate("/tmp/project", "/tmp/plan.json");
-    // Then invoke is called with expected args and the result is returned
+    // Then the API is called with expected args and the result is returned
     expect(result.valid).toBe(true);
-    expect(invokeMock).toHaveBeenCalledWith("plan_validate", { projectRoot: "/tmp/project", planPath: "/tmp/plan.json" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/plan/validate");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json" }));
+    expect(init?.headers).toBeInstanceOf(Headers);
+    expect((init!.headers as Headers).get("content-type")).toBe("application/json");
   });
 
   it("calls run_next", async () => {
     // Given the backend returns a completed run result
-    invokeMock.mockResolvedValue({ state: "completed", runId: "run-1", message: "done" });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ state: "completed", runId: "run-1", message: "done" })
+    });
     // When run next is requested
     const result = await runNext("/tmp/project", "/tmp/plan.json", "codex");
-    // Then invoke is called with expected args and the state is returned
+    // Then the API is called with expected args and the state is returned
     expect(result.state).toBe("completed");
-    expect(invokeMock).toHaveBeenCalledWith("run_next", {
-      projectRoot: "/tmp/project",
-      planPath: "/tmp/plan.json",
-      adapter: "codex"
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/run/next");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json", adapter: "codex" }));
+    expect(init?.headers).toBeInstanceOf(Headers);
+    expect((init!.headers as Headers).get("content-type")).toBe("application/json");
   });
 
   it("calls packs + guidance endpoints", async () => {
     // Given the backend responds to each call
-    invokeMock
-      .mockResolvedValueOnce({ installed: false })
-      .mockResolvedValueOnce([{ name: "forge-guidance-pack", version: "1.0.0", path: "/packs/x" }])
-      .mockResolvedValueOnce([{ name: "forge-guidance-pack", hasUpdate: true, latestVersion: "2.0.0" }])
-      .mockResolvedValueOnce({ name: "forge-guidance-pack", version: "2.0.0", path: "/packs/y" })
-      .mockResolvedValueOnce({ success: true })
-      .mockResolvedValueOnce(["/evidence/1"]);
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ installed: false }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ name: "forge-guidance-pack", version: "1.0.0", path: "/packs/x" }]
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ name: "forge-guidance-pack", hasUpdate: true, latestVersion: "2.0.0" }]
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ name: "forge-guidance-pack", version: "2.0.0", path: "/packs/y" })
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ["/evidence/1"] });
 
     // When project and pack operations are requested
     await projectGetGuidanceStatus("/tmp/project");
@@ -69,24 +90,47 @@ describe("useControlPlane", () => {
     await projectInstallGuidance("/tmp/project", "/packs/y", false);
     const evidence = await getEvidence("/tmp/project", "task-1");
 
-    // Then the expected invoke calls occur
-    expect(invokeMock).toHaveBeenCalledWith("project_get_guidance_status", { projectRoot: "/tmp/project" });
-    expect(invokeMock).toHaveBeenCalledWith("packs_list_installed");
-    expect(invokeMock).toHaveBeenCalledWith("packs_check_updates");
-    expect(invokeMock).toHaveBeenCalledWith("packs_download", { packName: "forge-guidance-pack", version: undefined });
-    expect(invokeMock).toHaveBeenCalledWith("project_install_guidance", {
-      projectRoot: "/tmp/project",
-      packPath: "/packs/y",
-      forceReplace: false
-    });
+    // Then the expected API calls occur
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+
+    const [u1, i1] = fetchMock.mock.calls[0]!;
+    expect(u1).toBe("http://localhost:1420/api/project/guidance-status?projectRoot=%2Ftmp%2Fproject");
+    expect(i1?.method).toBe("GET");
+
+    const [u2, i2] = fetchMock.mock.calls[1]!;
+    expect(u2).toBe("/api/packs/installed");
+    expect(i2?.method).toBe("GET");
+
+    const [u3, i3] = fetchMock.mock.calls[2]!;
+    expect(u3).toBe("/api/packs/updates");
+    expect(i3?.method).toBe("GET");
+
+    const [u4, i4] = fetchMock.mock.calls[3]!;
+    expect(u4).toBe("/api/packs/download");
+    expect(i4?.method).toBe("POST");
+    expect(i4?.body).toBe(JSON.stringify({ packName: "forge-guidance-pack", version: undefined }));
+
+    const [u5, i5] = fetchMock.mock.calls[4]!;
+    expect(u5).toBe("/api/project/install-guidance");
+    expect(i5?.method).toBe("POST");
+    expect(i5?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", packPath: "/packs/y", forceReplace: false }));
+
+    const [u6, i6] = fetchMock.mock.calls[5]!;
+    expect(u6).toBe("http://localhost:1420/api/evidence?projectRoot=%2Ftmp%2Fproject&taskId=task-1");
+    expect(i6?.method).toBe("GET");
+
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init?.headers).toBeInstanceOf(Headers);
+      expect((init!.headers as Headers).get("content-type")).toBe("application/json");
+    }
     expect(evidence).toEqual(["/evidence/1"]);
   });
 
   it("calls pause and resume", async () => {
     // Given pause and resume succeed
-    invokeMock
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce({ state: "completed", runId: "run-1", message: "ok" });
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => true })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: "completed", runId: "run-1", message: "ok" }) });
 
     // When pause and resume are requested
     expect(await pauseRun("run-1")).toBe(true);

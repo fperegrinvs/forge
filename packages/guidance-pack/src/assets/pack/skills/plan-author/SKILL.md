@@ -10,6 +10,8 @@ Default prompt: Draft or revise a Forge plan with complete task metadata, depend
 ## Workflow
 - Follow phases: spec -> implement -> refactor -> document -> commit.
 - Keep changes deterministic and aligned with policy gates.
+- Each phase ends with its gate passing AND a commit.
+- Do not advance to the next phase until the gate passes (except diagnostic gates).
 
 ## Instructions
 - Keep every task small enough for deterministic execution and review.

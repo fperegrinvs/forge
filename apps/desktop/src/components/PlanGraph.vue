@@ -7,6 +7,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { VueFlow } from "@vue-flow/core";
+import "@vue-flow/core/dist/style.css";
+import "@vue-flow/core/dist/theme-default.css";
 
 type Task = {
   id: string;

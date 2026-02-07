@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "project": {
     "name": "Forge",
     "description": "Spec-driven development system powered by AI agents. Plan → Execute → Verify with quality gates at every step.",
@@ -54,7 +54,26 @@
       "refactor",
       "document",
       "commit"
-    ]
+    ],
+    "phase_gates": {
+      "spec":      { "gate": "spec",     "commit": true,  "prefix": "spec",      "diagnostic": true  },
+      "implement": { "gate": "green",    "commit": true,  "prefix": "implement", "diagnostic": false },
+      "refactor":  { "gate": "refactor", "commit": true,  "prefix": "refactor",  "diagnostic": false },
+      "document":  { "gate": "docs",     "commit": true,  "prefix": "docs",      "diagnostic": false },
+      "commit":    { "gate": "verify",   "commit": false, "prefix": null,        "diagnostic": false }
+    },
+    "discipline": {
+      "method": "BDD/TDD red-green-refactor",
+      "rules": [
+        "NEVER write production code without a failing test. Tests come first, always.",
+        "The spec phase produces RED tests — they must fail before any implementation.",
+        "The implement phase produces GREEN tests — write only the minimum code to pass.",
+        "The refactor phase keeps tests GREEN — improve structure without changing behavior.",
+        "Each phase ends with its gate passing AND a commit. No silent phase transitions.",
+        "If a gate fails, fix the issue in the current phase. Do not advance.",
+        "If spec-phase tests pass immediately, the specification is too weak — strengthen it."
+      ]
+    }
   },
   "quality": {
     "require_bdd": true,

@@ -11,7 +11,7 @@ This repository implements Phase 0-2 of Forge componentization.
 - `packages/adapter-codex` and `packages/adapter-claude`: Runtime adapters with unified event contract.
 - `packages/control-plane`: Plan lifecycle orchestration and evidence persistence.
 - `packages/cli`: Public command surface (`forge ...`) wrapping package services.
-- `apps/desktop`: Tauri + Vue UI that calls control-plane bridge commands.
+- `apps/desktop`: Tauri + Vue UI with an embedded single-port HTTP server that serves both the Vite-built frontend and `/api/*` backend routes on one origin.
 
 ## Data Flow
 
@@ -21,7 +21,7 @@ This repository implements Phase 0-2 of Forge componentization.
 4. Control-plane delegates to selected adapter.
 5. Control-plane runs checks via check-runner based on `task_type`.
 6. Control-plane writes evidence artifacts to `.forge/evidence`.
-7. Desktop UI invokes bridge commands for validate/run/pause/resume/evidence.
+7. Desktop UI calls `/api/*` endpoints on the same origin (single-port app-server in Tauri).
 
 ## Evidence Artifacts
 

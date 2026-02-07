@@ -2,11 +2,14 @@
 
 mod forge_cli;
 mod packs;
+mod http_server;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::Manager;
+use tauri::WebviewWindowBuilder;
 
 use crate::forge_cli::run_forge_json;
 use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, read_installed_packs};
@@ -286,6 +289,46 @@ async fn project_install_guidance(
 
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let http_port = crate::http_server::port();
+            let window_config = app
+                .config()
+                .app
+                .windows
+                .get(0)
+                .cloned()
+                .ok_or_else(|| "missing app.windows[0] in tauri.conf.json".to_string())?;
+
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = crate::http_server::serve(handle).await {
+                    eprintln!("forge desktop http server failed: {error}");
+                }
+            });
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Wait briefly for the server to bind before creating the main window.
+                for _ in 0..60 {
+                    if tokio::net::TcpStream::connect(("127.0.0.1", http_port)).await.is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+
+                if handle.get_webview_window(&window_config.label).is_some() {
+                    return;
+                }
+
+                if let Err(error) = WebviewWindowBuilder::from_config(&handle, &window_config)
+                    .and_then(|builder| builder.build())
+                {
+                    eprintln!("failed to create main window: {error}");
+                }
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             plan_validate,
             run_next,
