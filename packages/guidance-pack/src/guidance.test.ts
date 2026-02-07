@@ -121,6 +121,18 @@ describe("guidance pack", () => {
     expect(policy.version).toBeDefined();
   });
 
+  it("discovers plan-guided skill with references", async () => {
+    // Given the bundled guidance root
+    const root = getBundledGuidanceRoot();
+    // When skills are discovered
+    const skills = await discoverSkills(root);
+    // Then plan-guided is present with a SKILL.md and references
+    const planGuided = skills.find((s) => s.name === "plan-guided");
+    expect(planGuided).toBeDefined();
+    expect(planGuided!.hasSkillFile).toBe(true);
+    expect(planGuided!.hasReferences).toBe(true);
+  });
+
   it("keeps generated skills aligned with policy skill list", async () => {
     const root = getBundledGuidanceRoot();
     const policy = await loadBundledWorkflowPolicy();

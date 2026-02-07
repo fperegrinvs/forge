@@ -7,13 +7,16 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 tokio = { version = "1", features = ["fs", "net", "time"] }
 tower-http = { version = "0.5", features = ["fs"] }
+portable-pty = "0.8"
+futures-util = { version = "0.3", features = ["sink"] }
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 default = ["custom-protocol"]

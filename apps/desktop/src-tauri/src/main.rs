@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![deny(warnings)]
 
 mod forge_cli;
 mod packs;
 mod http_server;
+mod terminal;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -296,7 +298,7 @@ fn main() {
                 .config()
                 .app
                 .windows
-                .get(0)
+                .first()
                 .cloned()
                 .ok_or_else(|| "missing app.windows[0] in tauri.conf.json".to_string())?;
 
