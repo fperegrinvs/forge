@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,10 +9,10 @@ import type { InstallGuidanceOptions, InstallGuidanceResult, SkillDescriptor } f
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const builtPackRoot = join(currentDir, "assets", "pack");
 const sourcePackRoot = join(currentDir, "..", "src", "assets", "pack");
-const packRoot = existsSync(builtPackRoot) ? builtPackRoot : sourcePackRoot;
+const bundledPackRoot = existsSync(builtPackRoot) ? builtPackRoot : sourcePackRoot;
 const policyFile = "workflow-policy.v1.json";
 
-function hashContent(value: string): string {
+function hashBytes(value: Uint8Array): string {
   return createHash("sha1").update(value).digest("hex");
 }
 
@@ -47,7 +47,8 @@ export async function discoverSkills(guidanceRoot: string): Promise<SkillDescrip
   return skills;
 }
 
-export async function installGuidance(
+export async function installGuidanceFromPackRoot(
+  packRoot: string,
   targetRoot: string,
   options: InstallGuidanceOptions = {}
 ): Promise<InstallGuidanceResult> {
@@ -65,7 +66,9 @@ export async function installGuidance(
 
     await mkdir(destinationDir, { recursive: true });
 
-    const sourceContent = await readFile(source, "utf8");
+    // Guidance packs are primarily text, but treat files as bytes so we don't corrupt
+    // non-UTF8 content (images, binaries) if they appear later.
+    const sourceContent = await readFile(source);
 
     if (!(await exists(destination))) {
       await cp(source, destination);
@@ -73,14 +76,14 @@ export async function installGuidance(
       continue;
     }
 
-    const existingContent = await readFile(destination, "utf8");
-    if (hashContent(existingContent) === hashContent(sourceContent)) {
+    const existingContent = await readFile(destination);
+    if (hashBytes(existingContent) === hashBytes(sourceContent)) {
       result.skipped.push(rel);
       continue;
     }
 
     if (options.forceReplace) {
-      await writeFile(destination, sourceContent, "utf8");
+      await cp(source, destination, { force: true });
       result.updated.push(rel);
     } else {
       result.skipped.push(rel);
@@ -91,11 +94,18 @@ export async function installGuidance(
 }
 
 export function getBundledGuidanceRoot(): string {
-  return packRoot;
+  return bundledPackRoot;
+}
+
+export async function installGuidance(
+  targetRoot: string,
+  options: InstallGuidanceOptions = {}
+): Promise<InstallGuidanceResult> {
+  return await installGuidanceFromPackRoot(bundledPackRoot, targetRoot, options);
 }
 
 export async function loadBundledManifest(): Promise<Record<string, unknown>> {
-  const manifestPath = join(packRoot, "manifest.json");
+  const manifestPath = join(bundledPackRoot, "manifest.json");
   const content = await readFile(manifestPath, "utf8");
   return JSON.parse(content) as Record<string, unknown>;
 }

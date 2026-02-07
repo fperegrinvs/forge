@@ -1,14 +1,13 @@
 #!/usr/bin/env node
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import { Command } from "commander";
 import { ForgeControlPlane } from "@forge/control-plane";
 import {
   getBundledGuidanceRoot,
   installGuidance,
+  installGuidanceFromPackRoot,
   summarizeGuidanceDiff
 } from "@forge/guidance-pack";
-import { exists, listFilesRecursive } from "@forge/shared-utils";
 import { initProject, scaffoldModule } from "@forge/templates";
 import {
   formatMigrationSummary,
@@ -69,27 +68,6 @@ function formatRunResult(result: {
     lines.push(`manualResume: ${result.resumeCommand}`);
   }
   return lines.join("\n");
-}
-
-async function installGuidanceFromPath(sourceRoot: string, targetRoot: string): Promise<string[]> {
-  const sourceFiles = await listFilesRecursive(sourceRoot);
-  const installed: string[] = [];
-
-  for (const file of sourceFiles) {
-    const rel = relative(sourceRoot, file);
-    const destination = join(targetRoot, rel);
-    await mkdir(dirname(destination), { recursive: true });
-
-    if (await exists(destination)) {
-      continue;
-    }
-
-    const content = await readFile(file, "utf8");
-    await writeFile(destination, content, "utf8");
-    installed.push(rel);
-  }
-
-  return installed;
 }
 
 export function buildCli(): Command {
@@ -161,25 +139,28 @@ export function buildCli(): Command {
     .option("--version <version>", "guidance version", "latest")
     .option("--source <source>", "source kind: registry|git|path", "registry")
     .option("--path <path>", "source path when --source path is used")
+    .option("--force-replace", "replace local changes with guidance pack contents", false)
     .option("--json", "machine output")
-    .action(async (options: JsonFlag & { source: string; path?: string }) => {
+    .action(async (options: JsonFlag & { source: string; path?: string; forceReplace?: boolean }) => {
       try {
         if (options.source === "path") {
           if (!options.path) {
             throw new Error("--path is required when --source path is used");
           }
 
-          const files = await installGuidanceFromPath(resolve(options.path), process.cwd());
+          const result = await installGuidanceFromPackRoot(resolve(options.path), process.cwd(), {
+            forceReplace: options.forceReplace ?? false
+          });
           output(
             options.json
-              ? { success: true, source: options.path, installed: files }
-              : `Installed ${String(files.length)} files`,
+              ? { success: true, source: resolve(options.path), result }
+              : `Guidance installed: ${summarizeGuidanceDiff(result)}`,
             options.json
           );
           return;
         }
 
-        const result = await installGuidance(process.cwd());
+        const result = await installGuidance(process.cwd(), { forceReplace: options.forceReplace ?? false });
         output(
           options.json
             ? { success: true, source: getBundledGuidanceRoot(), result }

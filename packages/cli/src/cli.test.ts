@@ -134,9 +134,14 @@ describe("cli", () => {
       });
 
       // Then it reports installed files
-      const parsed = JSON.parse(stdout) as { success: boolean; installed: string[] };
+      const parsed = JSON.parse(stdout) as {
+        success: boolean;
+        source: string;
+        result: { installed: string[]; updated: string[]; skipped: string[] };
+      };
       expect(parsed.success).toBe(true);
-      expect(parsed.installed).toContain("rules/example.md");
+      expect(parsed.source).toBeTruthy();
+      expect(parsed.result.installed).toContain("rules/example.md");
     } finally {
       process.chdir(previous);
     }
@@ -458,9 +463,12 @@ describe("cli", () => {
         ]);
       });
 
-      const parsed = JSON.parse(stdout) as { success: boolean; installed: string[] };
+      const parsed = JSON.parse(stdout) as {
+        success: boolean;
+        result: { installed: string[]; updated: string[]; skipped: string[] };
+      };
       expect(parsed.success).toBe(true);
-      expect(parsed.installed).not.toContain("rules/example.md");
+      expect(parsed.result.installed).not.toContain("rules/example.md");
 
       const content = await readFile(join(target, "rules", "example.md"), "utf8");
       expect(content).toBe("existing\n");
