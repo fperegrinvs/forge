@@ -19,7 +19,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install
         run: |
-          if [ -f bun.lockb ]; then
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
             bun install --frozen-lockfile
           else
             bun install

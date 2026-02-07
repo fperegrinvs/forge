@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ClaudeAdapter } from "./adapter.js";
+import "./index.js";
 
 describe("ClaudeAdapter", () => {
   it("emits started output and completed events", async () => {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { exists } from "@forge/shared-utils";
 import { initProject, scaffoldModule } from "./template.js";
+import "./index.js";
 
 describe("template package", () => {
   it("creates project skeleton", async () => {

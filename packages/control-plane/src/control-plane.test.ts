@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { chmod } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { ForgeControlPlane } from "./control-plane.js";
+import "./index.js";
 
 const planTemplate = {
   metadata: {

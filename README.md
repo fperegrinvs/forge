@@ -36,7 +36,7 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 ## Quickstart
 
 1. Run `./scripts/bootstrap-toolchain.sh --check`.
-2. Install dependencies with `bun install` (this should generate `bun.lockb`; commit it).
+2. Install dependencies with `bun install` (this should generate `bun.lock`; commit it).
 3. Synchronize workflow assets with `bun run workflow:sync`.
 4. Run `bun run verify`.
 

@@ -158,7 +158,7 @@ Alternative retained:
   decisions/
   AGENTS.md
   package.json
-  bun.lockb
+  bun.lock
   tsconfig.json
   eslint.config.* 
 ```
