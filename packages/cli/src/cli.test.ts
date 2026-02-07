@@ -281,7 +281,8 @@ describe("cli", () => {
     }
   });
 
-  it("prints paused run information for run next", async () => {
+  it("auto-resumes paused run when run next is called", async () => {
+    // Given a workspace with a paused run and no check scripts (auto-pass)
     const root = await mkdtemp(join(tmpdir(), "forge-run-"));
     await mkdir(join(root, "checks", "task-types", "documentation"), { recursive: true });
     await mkdir(join(root, ".forge"), { recursive: true });
@@ -329,9 +330,10 @@ describe("cli", () => {
 
     const state = {
       planPath,
-      tasks: { "docs-1": "pending" },
+      tasks: { "docs-1": "paused" },
       pausedRun: {
         runId: "run-1",
+        taskId: "docs-1",
         adapterType: "codex",
         externalRunId: "ext-1"
       },
@@ -342,14 +344,17 @@ describe("cli", () => {
     const previous = process.cwd();
     process.chdir(root);
     try {
+      // When run next is called on a paused run
       const { stdout } = await captureStdio(async () => {
         const cli = buildCli();
-        await cli.parseAsync(["node", "forge", "run", "next", "--plan", planPath]);
+        await cli.parseAsync(["node", "forge", "run", "next", "--plan", planPath, "--json"]);
       });
 
-      expect(stdout).toContain("Execution is paused");
-      expect(stdout).toContain("externalRunId: ext-1");
-      expect(stdout).toContain("manualResume: codex resume ext-1");
+      // Then it auto-resumes and executes the task (completed since no failing checks)
+      const parsed = JSON.parse(stdout) as { state: string; taskId: string; message: string };
+      expect(parsed.state).toBe("completed");
+      expect(parsed.taskId).toBe("docs-1");
+      expect(parsed.message).toContain("Task completed");
     } finally {
       process.chdir(previous);
     }
