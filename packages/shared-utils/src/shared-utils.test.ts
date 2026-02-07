@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -41,6 +41,7 @@ describe("@forge/shared-utils", () => {
     const a = join(root, "a.txt");
     const b = join(root, "nested", "b.txt");
     await writeFile(a, "a", "utf8");
+    await mkdir(join(root, "nested"), { recursive: true });
     await writeFile(b, "b", "utf8");
 
     // When files are listed recursively
@@ -67,4 +68,3 @@ describe("@forge/shared-utils", () => {
     expect(result.stderr).toContain("stderr-line");
   });
 });
-

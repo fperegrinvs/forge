@@ -4,7 +4,21 @@ import { fileURLToPath } from "node:url";
 import { exists } from "@forge/shared-utils";
 
 const baseDir = dirname(fileURLToPath(import.meta.url));
-const assetsDir = join(baseDir, "assets");
+
+async function resolveAssetsDir(): Promise<string> {
+  const built = join(baseDir, "assets");
+  if (await exists(built)) {
+    return built;
+  }
+
+  // When running from dist/, tsc does not copy assets. Fall back to src assets.
+  const source = join(baseDir, "..", "src", "assets");
+  if (await exists(source)) {
+    return source;
+  }
+
+  throw new Error(`Template assets not found (checked: ${built}, ${source})`);
+}
 
 type ScaffoldOptions = {
   withContractTest?: boolean;
@@ -28,6 +42,7 @@ async function renderTemplate(path: string, values: Record<string, string>): Pro
 }
 
 export async function initProject(projectName: string, targetRoot: string): Promise<string> {
+  const assetsDir = await resolveAssetsDir();
   const source = join(assetsDir, "forge-template");
   const destination = join(targetRoot, projectName);
 
@@ -45,6 +60,7 @@ export async function scaffoldModule(
   projectRoot: string,
   options: ScaffoldOptions = {}
 ): Promise<string[]> {
+  const assetsDir = await resolveAssetsDir();
   const pascalName = toPascalCase(moduleName);
   const moduleRoot = join(projectRoot, "modules", moduleName);
 
