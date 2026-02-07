@@ -6,15 +6,18 @@ const { fetchMock } = vi.hoisted(() => ({
 
 import {
   getEvidence,
+  listTemplates,
   packsCheckUpdates,
   packsDownload,
   packsListInstalled,
   pauseRun,
   planValidate,
   projectGetGuidanceStatus,
+  projectInit,
   projectInstallGuidance,
   resumeRun,
-  runNext
+  runNext,
+  selectFolder
 } from "./useControlPlane";
 
 describe("useControlPlane", () => {
@@ -124,6 +127,71 @@ describe("useControlPlane", () => {
       expect((init!.headers as Headers).get("content-type")).toBe("application/json");
     }
     expect(evidence).toEqual(["/evidence/1"]);
+  });
+
+  it("listTemplates fetches GET /api/templates and returns template array", async () => {
+    // Given the backend returns a templates list
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => [{ id: "forge-template", name: "Forge Template", description: "Default project template" }]
+    });
+    // When listTemplates is called
+    const result = await listTemplates();
+    // Then it calls GET /api/templates and returns the template array
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/templates");
+    expect(init?.method).toBe("GET");
+    expect(result).toHaveLength(1);
+    expect(result[0]!.id).toBe("forge-template");
+  });
+
+  it("projectInit sends POST /api/project/init with correct body", async () => {
+    // Given the backend returns success
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, projectRoot: "/tmp/my-project" })
+    });
+    // When projectInit is called with required fields
+    const result = await projectInit({ parentDir: "/tmp", projectName: "my-project", template: "forge-template" });
+    // Then POST /api/project/init is called with the correct body
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/project/init");
+    expect(init?.method).toBe("POST");
+    const body = JSON.parse(init!.body as string);
+    expect(body.parentDir).toBe("/tmp");
+    expect(body.projectName).toBe("my-project");
+    expect(body.template).toBe("forge-template");
+    expect(result.success).toBe(true);
+  });
+
+  it("selectFolder fetches GET /api/dialog/select-folder and returns path or null", async () => {
+    // Given the backend returns a selected folder path
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ path: "/Users/me/projects" })
+    });
+    // When selectFolder is called
+    const result = await selectFolder();
+    // Then it calls GET /api/dialog/select-folder and returns the path
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/dialog/select-folder");
+    expect(init?.method).toBe("GET");
+    expect(result).toBe("/Users/me/projects");
+  });
+
+  it("selectFolder returns null when user cancels", async () => {
+    // Given the backend returns null path (user cancelled)
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ path: null })
+    });
+    // When selectFolder is called
+    const result = await selectFolder();
+    // Then it returns null
+    expect(result).toBeNull();
   });
 
   it("calls pause and resume", async () => {

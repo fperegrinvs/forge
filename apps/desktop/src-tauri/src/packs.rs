@@ -606,6 +606,100 @@ mod tests {
   }
 
   #[test]
+  fn read_bundled_packs_returns_empty_when_dir_missing() {
+    // Given a non-existent bundled-packs directory
+    let dir = PathBuf::from("/tmp/forge-test-nonexistent-bundled-packs-dir");
+
+    // When bundled packs are read from a missing directory
+    let result = read_bundled_packs(&dir);
+
+    // Then an empty list is returned without error
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
+  }
+
+  #[test]
+  fn read_bundled_packs_reads_manifest_from_pack_dir() {
+    // Given a temporary directory containing a bundled pack with a manifest
+    let dir = PathBuf::from("/tmp/forge-test-bundled-packs-manifest");
+    let pack_dir = dir.join("forge-guidance-pack");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&pack_dir).unwrap();
+    fs::write(
+      pack_dir.join("manifest.json"),
+      r#"{"name":"forge-guidance-pack","version":"1.0.0"}"#,
+    )
+    .unwrap();
+
+    // When bundled packs are read
+    let result = read_bundled_packs(&dir);
+
+    // Then it returns an InstalledPack with correct name, version, and path
+    let packs = result.unwrap();
+    assert_eq!(packs.len(), 1);
+    assert_eq!(packs[0].name, "forge-guidance-pack");
+    assert_eq!(packs[0].version, "1.0.0");
+    assert_eq!(packs[0].path, pack_dir.to_string_lossy());
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn read_bundled_packs_skips_entries_without_manifest() {
+    // Given a directory with a subdirectory but no manifest.json
+    let dir = PathBuf::from("/tmp/forge-test-bundled-packs-no-manifest");
+    let pack_dir = dir.join("some-pack");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&pack_dir).unwrap();
+    fs::write(pack_dir.join("readme.txt"), "hello").unwrap();
+
+    // When bundled packs are read
+    let result = read_bundled_packs(&dir);
+
+    // Then the entry without a manifest is skipped
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn read_bundled_packs_dedup_with_downloaded() {
+    // Given a bundled pack and a downloaded pack with the same name
+    let bundled_dir = PathBuf::from("/tmp/forge-test-bundled-dedup");
+    let pack_dir = bundled_dir.join("forge-guidance-pack");
+    let _ = fs::remove_dir_all(&bundled_dir);
+    fs::create_dir_all(&pack_dir).unwrap();
+    fs::write(
+      pack_dir.join("manifest.json"),
+      r#"{"name":"forge-guidance-pack","version":"1.0.0"}"#,
+    )
+    .unwrap();
+
+    let bundled = read_bundled_packs(&bundled_dir).unwrap();
+    let downloaded = vec![InstalledPack {
+      name: "forge-guidance-pack".to_string(),
+      version: "2.0.0".to_string(),
+      path: "/downloaded/path".to_string(),
+    }];
+
+    // When bundled and downloaded packs are merged
+    let merged = merge_bundled_packs(bundled, downloaded.clone());
+
+    // Then the downloaded version takes precedence (bundled is not duplicated)
+    let guidance: Vec<&InstalledPack> = merged.iter().filter(|p| p.name == "forge-guidance-pack").collect();
+    assert_eq!(guidance.len(), 1, "no duplicates in merged list");
+    assert_eq!(guidance[0].version, "2.0.0", "downloaded version wins");
+
+    // And when no downloaded version exists, bundled is included
+    let merged_no_download = merge_bundled_packs(read_bundled_packs(&bundled_dir).unwrap(), vec![]);
+    assert_eq!(merged_no_download.len(), 1);
+    assert_eq!(merged_no_download[0].version, "1.0.0");
+
+    let _ = fs::remove_dir_all(&bundled_dir);
+  }
+
+  #[test]
   fn find_zip_symlink_entry_detects_symlinks() {
     // Given unzip verbose output that includes a symlink entry
     let listing = r#"
