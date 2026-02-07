@@ -1,0 +1,98 @@
+{
+  "version": "1.0.0",
+  "workflow": {
+    "phases": [
+      "spec",
+      "implement",
+      "refactor",
+      "document",
+      "commit"
+    ]
+  },
+  "quality": {
+    "require_bdd": true,
+    "require_property_tests": true,
+    "require_contract_tests": true,
+    "require_docs_updates": true
+  },
+  "commands": {
+    "gates": {
+      "spec": "npm run typecheck && npm run test -- --runInBand --passWithNoTests=false",
+      "green": "npm run test && npm run typecheck && npm run lint",
+      "refactor": "npm run test && npm run typecheck && npm run lint",
+      "docs": "npm run docs:check",
+      "commit": "git status --porcelain",
+      "verify": "npm run test && npm run typecheck && npm run lint && npm run test:desktop"
+    }
+  },
+  "docs": {
+    "allowed_update_globs": [
+      "docs/**/*.md",
+      "decisions.md"
+    ]
+  },
+  "check_runner": {
+    "task_type_gates": {
+      "implementation": [
+        "green",
+        "docs"
+      ],
+      "testing": [
+        "green"
+      ],
+      "documentation": [
+        "docs"
+      ]
+    }
+  },
+  "skills": [
+    {
+      "name": "plan-author",
+      "description": "Create or revise Forge plan artifacts with dependency-aware tasks, explicit tests metadata, and documentation updates. Use when planning or re-planning work before implementation.",
+      "default_prompt": "Draft or revise a Forge plan with complete task metadata, dependencies, verification commands, and documentation updates.",
+      "instructions": [
+        "Keep every task small enough for deterministic execution and review.",
+        "For each non-documentation task, include at least one code-first BDD scenario.",
+        "Describe property and contract tests when applicable; use empty arrays only if not relevant.",
+        "Always include documentation updates and decision notes for each task.",
+        "Use verification commands that can run unattended in CI."
+      ]
+    },
+    {
+      "name": "spec-bdd",
+      "description": "Author failing specification tests in code-first BDD style for Forge tasks. Use when implementing the Spec step before writing production code.",
+      "default_prompt": "Write failing tests first using Given/When/Then comments and align them to plan acceptance criteria.",
+      "instructions": [
+        "Write failing tests before implementation changes.",
+        "Use Given/When/Then comments in test bodies.",
+        "Favor behavior-focused assertions over implementation detail coupling.",
+        "Run the spec gate command after creating tests.",
+        "If tests pass before implementation, strengthen the specification."
+      ]
+    },
+    {
+      "name": "implement-green",
+      "description": "Implement the minimum code to satisfy Forge test gates while preserving modulith boundaries. Use during implementation and refactor phases.",
+      "default_prompt": "Implement the smallest change set that turns failing tests green and passes architecture checks.",
+      "instructions": [
+        "Implement domain-first and preserve module boundaries.",
+        "Avoid introducing any or bypassing lint/type checks.",
+        "Run green and refactor gates after implementation updates.",
+        "Keep public APIs stable unless the plan explicitly includes a breaking change.",
+        "Record constraints discovered during implementation in decision notes."
+      ]
+    },
+    {
+      "name": "document-and-decide",
+      "description": "Update task documentation and decision records to match implementation. Use during the documentation phase before commit.",
+      "default_prompt": "Update docs and decision notes so they accurately describe implemented behavior and interfaces.",
+      "instructions": [
+        "Update affected docs files and keep wording implementation-accurate.",
+        "Update decisions.md with rationale for meaningful technical decisions.",
+        "Ensure public interfaces include concise documentation comments.",
+        "Run the docs gate after documentation edits.",
+        "Reject completion if code and documentation diverge."
+      ]
+    }
+  ]
+}

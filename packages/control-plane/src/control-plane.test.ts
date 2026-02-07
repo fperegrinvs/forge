@@ -10,7 +10,7 @@ const planTemplate = {
     project: "forge",
     created: new Date().toISOString(),
     last_updated: new Date().toISOString(),
-    spec_version: "v1",
+    spec_version: "v2",
     approved: true
   },
   context: {
@@ -28,7 +28,16 @@ const planTemplate = {
       files: ["a.ts"],
       dependencies: [],
       acceptance_criteria: ["ok"],
-      verification_command: "echo ok"
+      verification_command: "echo ok",
+      tests: {
+        bdd_scenarios: ["Given state When action Then result"],
+        property_invariants: [],
+        contract_tests: []
+      },
+      documentation: {
+        updates: ["docs/architecture.md"],
+        decision_notes: "Initial behavior"
+      }
     }
   ]
 };

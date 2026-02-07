@@ -24,7 +24,8 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 
 1. Run `./scripts/bootstrap-toolchain.sh --check`.
 2. Install dependencies using your package manager (`bun install` preferred).
-3. Run `npm run verify`.
+3. Synchronize workflow assets with `npm run workflow:sync`.
+4. Run `npm run verify`.
 
 ## Core Commands
 
@@ -32,4 +33,13 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 - `forge scaffold module <module-name>`
 - `forge install-guidance`
 - `forge plan validate --file <path>`
+- `forge plan migrate --file <path> --write`
 - `forge run next --plan <path>`
+- `forge workflow check --plan <path>`
+
+## Workflow Enforcement
+
+- Canonical policy: `/Users/simon/projects/forge/packages/guidance-pack/src/policy/workflow-policy.v1.json`
+- Sync generated assets: `npm run workflow:sync`
+- Verify generated assets are up to date: `npm run workflow:check-sync`
+- Run hard-fail workflow checks for this repo: `npm run workflow:check`

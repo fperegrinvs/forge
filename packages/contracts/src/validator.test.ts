@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Plan } from "./types.js";
-import { validatePlanGraph, validatePlanSchema } from "./validator.js";
+import { validatePlanGraph, validatePlanSchema, validatePlanWorkflow } from "./validator.js";
 
 const basePlan: Plan = {
   metadata: {
     project: "forge",
     created: new Date().toISOString(),
     last_updated: new Date().toISOString(),
-    spec_version: "v1",
+    spec_version: "v2",
     approved: true
   },
   context: {
@@ -25,7 +25,16 @@ const basePlan: Plan = {
       files: ["a.ts"],
       dependencies: [],
       acceptance_criteria: ["works"],
-      verification_command: "echo ok"
+      verification_command: "echo ok",
+      tests: {
+        bdd_scenarios: ["Given X When Y Then Z"],
+        property_invariants: ["Invariant A"],
+        contract_tests: ["Contract A"]
+      },
+      documentation: {
+        updates: ["docs/architecture.md"],
+        decision_notes: "Documented behavior"
+      }
     }
   ]
 };
@@ -49,6 +58,55 @@ describe("validatePlanSchema", () => {
 
     const result = await validatePlanSchema(invalid);
     expect(result.valid).toBe(false);
+  });
+
+  it("rejects missing tests.bdd_scenarios", async () => {
+    const invalid = {
+      ...basePlan,
+      tasks: [
+        {
+          ...basePlan.tasks[0],
+          tests: {
+            property_invariants: [],
+            contract_tests: []
+          }
+        }
+      ]
+    };
+
+    const result = await validatePlanSchema(invalid);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects missing documentation.updates", async () => {
+    const invalid = {
+      ...basePlan,
+      tasks: [
+        {
+          ...basePlan.tasks[0],
+          documentation: {
+            decision_notes: "note"
+          }
+        }
+      ]
+    };
+
+    const result = await validatePlanSchema(invalid);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects legacy spec version", async () => {
+    const invalid = {
+      ...basePlan,
+      metadata: {
+        ...basePlan.metadata,
+        spec_version: "v1"
+      }
+    };
+
+    const result = await validatePlanSchema(invalid);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "legacy_spec_version")).toBe(true);
   });
 });
 
@@ -109,5 +167,45 @@ describe("validatePlanGraph", () => {
     const result = validatePlanGraph(plan, new Set(["implementation"]));
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.code === "duplicate_task")).toBe(true);
+  });
+});
+
+describe("validatePlanWorkflow", () => {
+  it("requires bdd scenarios for non-documentation tasks", () => {
+    const plan: Plan = {
+      ...basePlan,
+      tasks: [
+        {
+          ...basePlan.tasks[0],
+          tests: {
+            ...basePlan.tasks[0].tests,
+            bdd_scenarios: []
+          }
+        }
+      ]
+    };
+
+    const result = validatePlanWorkflow(plan);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "missing_bdd_scenarios")).toBe(true);
+  });
+
+  it("requires documentation updates for non-documentation tasks", () => {
+    const plan: Plan = {
+      ...basePlan,
+      tasks: [
+        {
+          ...basePlan.tasks[0],
+          documentation: {
+            ...basePlan.tasks[0].documentation,
+            updates: []
+          }
+        }
+      ]
+    };
+
+    const result = validatePlanWorkflow(plan);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "missing_documentation_updates")).toBe(true);
   });
 });

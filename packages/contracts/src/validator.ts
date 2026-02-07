@@ -6,6 +6,7 @@ import type { ErrorObject } from "ajv";
 import type { Plan, PlanValidationResult, ValidationIssue } from "./types.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
+export const CURRENT_PLAN_SPEC_VERSION = "v2";
 
 async function loadSchema(): Promise<object> {
   const builtPath = join(currentDir, "schema", "plan.v1.schema.json");
@@ -23,6 +24,20 @@ function toIssue(error: ErrorObject<string, Record<string, unknown>>): Validatio
 }
 
 export async function validatePlanSchema(plan: unknown): Promise<PlanValidationResult> {
+  const specVersion = readSpecVersion(plan);
+  if (specVersion && specVersion !== CURRENT_PLAN_SPEC_VERSION) {
+    return {
+      valid: false,
+      issues: [
+        {
+          path: "/metadata/spec_version",
+          message: `Legacy plan spec '${specVersion}' detected. Run 'forge plan migrate --file <path> --write'.`,
+          code: "legacy_spec_version"
+        }
+      ]
+    };
+  }
+
   const ajv = new Ajv2020.Ajv2020({ allErrors: true, strict: false, validateFormats: false });
   const schema = await loadSchema();
   const validate = ajv.compile(schema);
@@ -32,6 +47,20 @@ export async function validatePlanSchema(plan: unknown): Promise<PlanValidationR
     valid,
     issues: valid ? [] : (validate.errors ?? []).map(toIssue)
   };
+}
+
+function readSpecVersion(plan: unknown): string | undefined {
+  if (!plan || typeof plan !== "object") {
+    return undefined;
+  }
+
+  const metadata = (plan as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return undefined;
+  }
+
+  const specVersion = (metadata as Record<string, unknown>).spec_version;
+  return typeof specVersion === "string" ? specVersion : undefined;
 }
 
 function detectCycle(plan: Plan): string[] {
@@ -118,6 +147,36 @@ export function validatePlanGraph(plan: Plan, registeredTaskTypes: Set<string>):
       message: `Cyclic dependency detected: ${cycle.join(" -> ")}`,
       code: "cycle"
     });
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues
+  };
+}
+
+export function validatePlanWorkflow(plan: Plan): PlanValidationResult {
+  const issues: ValidationIssue[] = [];
+
+  for (const task of plan.tasks) {
+    const taskPath = `/tasks/${task.id}`;
+    const requiresBdd = task.task_type !== "documentation";
+
+    if (requiresBdd && task.tests.bdd_scenarios.length === 0) {
+      issues.push({
+        path: `${taskPath}/tests/bdd_scenarios`,
+        message: "BDD scenarios are required for non-documentation tasks.",
+        code: "missing_bdd_scenarios"
+      });
+    }
+
+    if (requiresBdd && task.documentation.updates.length === 0) {
+      issues.push({
+        path: `${taskPath}/documentation/updates`,
+        message: "Documentation updates are required for non-documentation tasks.",
+        code: "missing_documentation_updates"
+      });
+    }
   }
 
   return {

@@ -21,10 +21,16 @@ export async function loadTaskTypeRegistry(checkRoot: string): Promise<Map<strin
       continue;
     }
 
-    const script = join(checkRoot, entry.name, "gate-green.sh");
+    const taskTypeDir = join(checkRoot, entry.name);
+    const taskTypeEntries = await readdir(taskTypeDir, { withFileTypes: true });
+    const scripts = taskTypeEntries
+      .filter((file) => file.isFile() && /^gate-.*\.sh$/.test(file.name))
+      .map((file) => join(taskTypeDir, file.name))
+      .sort();
+
     registry.set(entry.name, {
       taskType: entry.name,
-      scripts: [script]
+      scripts
     });
   }
 
@@ -55,6 +61,18 @@ export class ScriptCheckRunner implements CheckRunner {
           name: `${taskType}:missing-binding`,
           status: "infra_error",
           summary: `No checks registered for task type ${taskType}`,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString()
+        }
+      ];
+    }
+
+    if (binding.scripts.length === 0) {
+      return [
+        {
+          name: `${taskType}:missing-gates`,
+          status: "infra_error",
+          summary: `No gate scripts found for task type ${taskType}`,
           startedAt: new Date().toISOString(),
           finishedAt: new Date().toISOString()
         }

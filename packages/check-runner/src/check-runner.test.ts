@@ -66,4 +66,27 @@ describe("ScriptCheckRunner", () => {
     const result = await runner.runChecks("implementation", "task-1", process.cwd());
     expect(result[0]?.status).toBe("infra_error");
   });
+
+  it("loads all gate scripts in sorted order", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-checks-sorted-"));
+    await mkdir(join(root, "implementation"), { recursive: true });
+    const gateB = join(root, "implementation", "gate-green.sh");
+    const gateA = join(root, "implementation", "gate-docs.sh");
+    await writeFile(gateB, "#!/usr/bin/env bash\necho green\n", "utf8");
+    await writeFile(gateA, "#!/usr/bin/env bash\necho docs\n", "utf8");
+    await chmod(gateA, 0o755);
+    await chmod(gateB, 0o755);
+
+    const registry = await loadTaskTypeRegistry(root);
+    expect(registry.get("implementation")?.scripts).toEqual([gateA, gateB]);
+  });
+
+  it("returns infra_error when task type has no gate scripts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-checks-empty-"));
+    await mkdir(join(root, "implementation"), { recursive: true });
+    const registry = await loadTaskTypeRegistry(root);
+    const runner = new ScriptCheckRunner(registry);
+    const result = await runner.runChecks("implementation", "task-1", root);
+    expect(result[0]?.status).toBe("infra_error");
+  });
 });

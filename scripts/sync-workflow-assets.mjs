@@ -1,0 +1,334 @@
+import { createHash } from "node:crypto";
+import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(scriptDir, "..");
+const policyPath = join(repoRoot, "packages", "guidance-pack", "src", "policy", "workflow-policy.v1.json");
+const guidanceRoot = join(repoRoot, "packages", "guidance-pack", "src", "assets", "pack");
+const checksRoot = join(repoRoot, "checks", "task-types");
+
+function canonicalize(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalize(item));
+  }
+
+  if (value && typeof value === "object") {
+    const objectValue = value;
+    const next = {};
+    for (const key of Object.keys(objectValue).sort()) {
+      next[key] = canonicalize(objectValue[key]);
+    }
+    return next;
+  }
+
+  return value;
+}
+
+function toPrettyJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function createPolicyHash(policy) {
+  const canonicalPolicy = canonicalize(policy);
+  const payload = JSON.stringify(canonicalPolicy);
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+function renderAgents(policy) {
+  const phases = policy.workflow.phases.join(" -> ");
+  const gateCommands = policy.commands.gates;
+
+  return [
+    "# Forge AGENTS",
+    "",
+    `Workflow policy version: ${policy.version}`,
+    "",
+    "## Required Workflow",
+    `- Follow phases in order: ${phases}.`,
+    "- Use code-first BDD with Given/When/Then comments in tests.",
+    "- Keep modulith boundaries and import restrictions intact.",
+    "- Update documentation and decisions together with code changes.",
+    "",
+    "## Canonical Gates",
+    `- gate:spec -> ${gateCommands.spec}`,
+    `- gate:green -> ${gateCommands.green}`,
+    `- gate:refactor -> ${gateCommands.refactor}`,
+    `- gate:docs -> ${gateCommands.docs}`,
+    `- gate:commit -> ${gateCommands.commit}`,
+    `- gate:verify -> ${gateCommands.verify}`,
+    ""
+  ].join("\n");
+}
+
+function renderAgentsOverride(policy) {
+  return [
+    "# Forge AGENTS Override",
+    "",
+    `Policy version: ${policy.version}`,
+    "",
+    "Use this file only for nearest-directory overrides that tighten constraints.",
+    "Do not weaken required workflow gates from the root AGENTS.md.",
+    ""
+  ].join("\n");
+}
+
+function renderTestingRule(policy) {
+  return [
+    "# Testing Rules",
+    "",
+    `- require_bdd: ${String(policy.quality.require_bdd)}`,
+    `- require_property_tests: ${String(policy.quality.require_property_tests)}`,
+    `- require_contract_tests: ${String(policy.quality.require_contract_tests)}`,
+    "",
+    "Use code-first BDD in test files with Given/When/Then comments.",
+    `Run gate:spec with: ${policy.commands.gates.spec}`,
+    `Run gate:green with: ${policy.commands.gates.green}`,
+    `Run gate:refactor with: ${policy.commands.gates.refactor}`,
+    ""
+  ].join("\n");
+}
+
+function renderArchitectureRule() {
+  return [
+    "# Architecture Rules",
+    "",
+    "- Follow modulith module boundaries and import restrictions.",
+    "- Keep dependencies pointing inward: domain does not import infrastructure.",
+    "- Keep public module API in index.ts and route registration in routes.ts.",
+    ""
+  ].join("\n");
+}
+
+function renderDocumentationRule(policy) {
+  const allowed = policy.docs.allowed_update_globs.map((glob) => `- ${glob}`).join("\n");
+  return [
+    "# Documentation Rules",
+    "",
+    `- require_docs_updates: ${String(policy.quality.require_docs_updates)}`,
+    "- Update docs whenever implementation changes behavior or interfaces.",
+    "- Record rationale in decision notes and decisions.md.",
+    `Run gate:docs with: ${policy.commands.gates.docs}`,
+    "",
+    "Allowed documentation update globs:",
+    allowed,
+    ""
+  ].join("\n");
+}
+
+function renderSkill(skill, policy) {
+  const instructionLines = skill.instructions.map((line) => `- ${line}`);
+
+  return [
+    "---",
+    `name: ${skill.name}`,
+    `description: ${skill.description}`,
+    "---",
+    "",
+    `# ${skill.name}`,
+    "",
+    `Default prompt: ${skill.default_prompt}`,
+    "",
+    "## Workflow",
+    `- Follow phases: ${policy.workflow.phases.join(" -> ")}.`,
+    "- Keep changes deterministic and aligned with policy gates.",
+    "",
+    "## Instructions",
+    ...instructionLines,
+    ""
+  ].join("\n");
+}
+
+function renderGateScript(command) {
+  return ["#!/usr/bin/env bash", "set -euo pipefail", command, ""].join("\n");
+}
+
+async function listDirectories(rootDir) {
+  const entries = await readdir(rootDir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+}
+
+async function listFiles(rootDir) {
+  const entries = await readdir(rootDir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+}
+
+function buildExpectedAssets(policy) {
+  const policyHash = createPolicyHash(policy);
+
+  const manifest = {
+    name: "forge-guidance-pack",
+    version: "1.0.0",
+    workflow_policy_version: policy.version,
+    workflow_policy_hash: policyHash,
+    context: {
+      max_read_bytes: 262144
+    },
+    fallback_files: {
+      plan: "PLAN.md",
+      execution_log: "EXECUTION_LOG.md",
+      decisions: "decisions.md"
+    },
+    agents_precedence: ["global", "repo_root", "nearest_directory_override"]
+  };
+
+  const codexConfig = {
+    approval_mode: "suggest",
+    workflow_policy_version: policy.version,
+    workflow_policy_hash: policyHash
+  };
+
+  const expectedFiles = new Map();
+
+  expectedFiles.set(join(guidanceRoot, "AGENTS.md"), renderAgents(policy));
+  expectedFiles.set(join(guidanceRoot, "AGENTS.override.md"), renderAgentsOverride(policy));
+  expectedFiles.set(join(guidanceRoot, "rules", "testing.md"), renderTestingRule(policy));
+  expectedFiles.set(join(guidanceRoot, "rules", "architecture.md"), renderArchitectureRule());
+  expectedFiles.set(join(guidanceRoot, "rules", "documentation.md"), renderDocumentationRule(policy));
+  expectedFiles.set(join(guidanceRoot, "manifest.json"), toPrettyJson(manifest));
+  expectedFiles.set(join(guidanceRoot, "codex", "config.json"), toPrettyJson(codexConfig));
+
+  for (const skill of policy.skills) {
+    expectedFiles.set(join(guidanceRoot, "skills", skill.name, "SKILL.md"), renderSkill(skill, policy));
+  }
+
+  const expectedScripts = new Map();
+  const taskTypeGates = policy.check_runner.task_type_gates;
+
+  for (const [taskType, gates] of Object.entries(taskTypeGates)) {
+    for (const gate of gates) {
+      const command = policy.commands.gates[gate];
+      if (!command) {
+        throw new Error(`Unknown gate '${gate}' for task type '${taskType}'`);
+      }
+
+      const scriptPath = join(checksRoot, taskType, `gate-${gate}.sh`);
+      expectedScripts.set(scriptPath, renderGateScript(command));
+    }
+  }
+
+  return { expectedFiles, expectedScripts };
+}
+
+async function writeExpected(expectedFiles, expectedScripts) {
+  for (const [path, content] of expectedFiles) {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, "utf8");
+  }
+
+  for (const [path, content] of expectedScripts) {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, "utf8");
+    await chmod(path, 0o755);
+  }
+}
+
+async function removeStale(policy, expectedScripts) {
+  const skillsDir = join(guidanceRoot, "skills");
+  const expectedSkillNames = new Set(policy.skills.map((skill) => skill.name));
+
+  for (const dirName of await listDirectories(skillsDir)) {
+    if (!expectedSkillNames.has(dirName)) {
+      await rm(join(skillsDir, dirName), { recursive: true, force: true });
+    }
+  }
+
+  const expectedScriptsByDir = new Map();
+  for (const scriptPath of expectedScripts.keys()) {
+    const dir = dirname(scriptPath);
+    const set = expectedScriptsByDir.get(dir) ?? new Set();
+    set.add(scriptPath);
+    expectedScriptsByDir.set(dir, set);
+  }
+
+  for (const [taskType] of Object.entries(policy.check_runner.task_type_gates)) {
+    const dir = join(checksRoot, taskType);
+    const expectedInDir = expectedScriptsByDir.get(dir) ?? new Set();
+    for (const fileName of await listFiles(dir)) {
+      if (!fileName.startsWith("gate-") || !fileName.endsWith(".sh")) {
+        continue;
+      }
+      const fullPath = join(dir, fileName);
+      if (!expectedInDir.has(fullPath)) {
+        await rm(fullPath, { force: true });
+      }
+    }
+  }
+}
+
+async function collectMismatches(policy, expectedFiles, expectedScripts) {
+  const mismatches = [];
+
+  for (const [path, expectedContent] of [...expectedFiles, ...expectedScripts]) {
+    const actualContent = await readFile(path, "utf8").catch(() => null);
+    if (actualContent === null) {
+      mismatches.push(`missing: ${path}`);
+      continue;
+    }
+
+    if (actualContent !== expectedContent) {
+      mismatches.push(`outdated: ${path}`);
+    }
+  }
+
+  const skillsDir = join(guidanceRoot, "skills");
+  const expectedSkillNames = new Set(policy.skills.map((skill) => skill.name));
+
+  for (const dirName of await listDirectories(skillsDir)) {
+    if (!expectedSkillNames.has(dirName)) {
+      mismatches.push(`unexpected skill directory: ${join(skillsDir, dirName)}`);
+    }
+  }
+
+  for (const [taskType] of await readdir(checksRoot, { withFileTypes: true }).then((entries) =>
+    entries.filter((entry) => entry.isDirectory()).map((entry) => [entry.name])
+  )) {
+    const dir = join(checksRoot, taskType);
+    const expectedInDir = new Set(
+      [...expectedScripts.keys()].filter((path) => dirname(path) === dir).map((path) => path)
+    );
+
+    for (const fileName of await listFiles(dir)) {
+      if (!fileName.startsWith("gate-") || !fileName.endsWith(".sh")) {
+        continue;
+      }
+      const fullPath = join(dir, fileName);
+      if (!expectedInDir.has(fullPath)) {
+        mismatches.push(`unexpected gate script: ${fullPath}`);
+      }
+    }
+  }
+
+  return mismatches;
+}
+
+export async function syncWorkflowAssets({ check = false } = {}) {
+  const policyRaw = await readFile(policyPath, "utf8");
+  const policy = JSON.parse(policyRaw);
+  const { expectedFiles, expectedScripts } = buildExpectedAssets(policy);
+
+  if (check) {
+    const mismatches = await collectMismatches(policy, expectedFiles, expectedScripts);
+    if (mismatches.length > 0) {
+      throw new Error(`Workflow assets out of sync:\n${mismatches.join("\n")}`);
+    }
+    return;
+  }
+
+  await writeExpected(expectedFiles, expectedScripts);
+  await removeStale(policy, expectedScripts);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const check = process.argv.includes("--check");
+  syncWorkflowAssets({ check })
+    .then(() => {
+      process.stdout.write(check ? "Workflow assets are in sync\n" : "Workflow assets synchronized\n");
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`${message}\n`);
+      process.exit(1);
+    });
+}

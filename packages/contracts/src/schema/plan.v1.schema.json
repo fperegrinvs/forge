@@ -11,7 +11,7 @@
         "project": { "type": "string", "minLength": 1 },
         "created": { "type": "string", "format": "date-time" },
         "last_updated": { "type": "string", "format": "date-time" },
-        "spec_version": { "type": "string", "minLength": 1 },
+        "spec_version": { "const": "v2" },
         "approved": { "type": "boolean" }
       },
       "additionalProperties": false
@@ -43,7 +43,9 @@
           "files",
           "dependencies",
           "acceptance_criteria",
-          "verification_command"
+          "verification_command",
+          "tests",
+          "documentation"
         ],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-_]*$" },
@@ -65,6 +67,37 @@
             "items": { "type": "string", "minLength": 1 }
           },
           "verification_command": { "type": "string", "minLength": 1 },
+          "tests": {
+            "type": "object",
+            "required": ["bdd_scenarios", "property_invariants", "contract_tests"],
+            "properties": {
+              "bdd_scenarios": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "property_invariants": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "contract_tests": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            },
+            "additionalProperties": false
+          },
+          "documentation": {
+            "type": "object",
+            "required": ["updates", "decision_notes"],
+            "properties": {
+              "updates": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "decision_notes": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
           "steps": {
             "type": "array",
             "items": {

@@ -1,4 +1,5 @@
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -6,7 +7,10 @@ import { exists, listFilesRecursive } from "@forge/shared-utils";
 import type { InstallGuidanceOptions, InstallGuidanceResult, SkillDescriptor } from "./types.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const packRoot = join(currentDir, "assets", "pack");
+const builtPackRoot = join(currentDir, "assets", "pack");
+const sourcePackRoot = join(currentDir, "..", "src", "assets", "pack");
+const packRoot = existsSync(builtPackRoot) ? builtPackRoot : sourcePackRoot;
+const policyFile = "workflow-policy.v1.json";
 
 function hashContent(value: string): string {
   return createHash("sha1").update(value).digest("hex");
@@ -93,6 +97,13 @@ export function getBundledGuidanceRoot(): string {
 export async function loadBundledManifest(): Promise<Record<string, unknown>> {
   const manifestPath = join(packRoot, "manifest.json");
   const content = await readFile(manifestPath, "utf8");
+  return JSON.parse(content) as Record<string, unknown>;
+}
+
+export async function loadBundledWorkflowPolicy(): Promise<Record<string, unknown>> {
+  const builtPath = join(currentDir, "policy", policyFile);
+  const sourcePath = join(currentDir, "..", "src", "policy", policyFile);
+  const content = await readFile(builtPath, "utf8").catch(() => readFile(sourcePath, "utf8"));
   return JSON.parse(content) as Record<string, unknown>;
 }
 

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { CodexAdapter } from "@forge/adapter-codex";
 import { ClaudeAdapter } from "@forge/adapter-claude";
 import { ScriptCheckRunner, loadTaskTypeRegistry } from "@forge/check-runner";
-import { loadPlan, validatePlanGraph, validatePlanSchema } from "@forge/contracts";
+import { loadPlan, validatePlanGraph, validatePlanSchema, validatePlanWorkflow } from "@forge/contracts";
 import { exists, writeJsonFile } from "@forge/shared-utils";
 import type { AdapterEvent, AgentAdapter, CheckResult, RunContext } from "@forge/shared-utils";
 import type { AdapterFactory, AdapterType, RunNextResult, RuntimeState, TaskState } from "./types.js";
@@ -65,7 +65,12 @@ export class ForgeControlPlane {
     }
 
     const registry = await loadTaskTypeRegistry(checkRoot);
-    return validatePlanGraph(plan, new Set(registry.keys()));
+    const graph = validatePlanGraph(plan, new Set(registry.keys()));
+    if (!graph.valid) {
+      return graph;
+    }
+
+    return validatePlanWorkflow(plan);
   }
 
   async runNext(

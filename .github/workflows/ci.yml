@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -19,5 +21,9 @@ jobs:
         run: npm install
       - name: Toolchain preflight
         run: ./scripts/bootstrap-toolchain.sh --check
+      - name: Workflow assets in sync
+        run: npm run workflow:check-sync
+      - name: Workflow checks
+        run: npm run workflow:check
       - name: Verify
         run: npm run verify

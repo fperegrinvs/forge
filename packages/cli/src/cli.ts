@@ -10,6 +10,12 @@ import {
 } from "@forge/guidance-pack";
 import { exists, listFilesRecursive } from "@forge/shared-utils";
 import { initProject, scaffoldModule } from "@forge/templates";
+import {
+  formatMigrationSummary,
+  formatWorkflowCheckSummary,
+  migratePlanFile,
+  runWorkflowCheck
+} from "./workflow.js";
 
 type JsonFlag = { json?: boolean };
 
@@ -63,14 +69,27 @@ export function buildCli(): Command {
     .option("--template <name>", "template identifier", "local")
     .option("--runtime <bun-version>", "bun version pin")
     .option("--ui <mode>", "ui mode", "vuetify")
+    .option("--skip-guidance", "skip installing guidance pack")
     .option("--json", "machine output")
-    .action(async (projectName: string, options: JsonFlag) => {
+    .action(async (projectName: string, options: JsonFlag & { skipGuidance?: boolean }) => {
       try {
         const createdPath = await initProject(projectName, process.cwd());
+        const guidanceResult = options.skipGuidance ? undefined : await installGuidance(createdPath);
         output(
           options.json
-            ? { success: true, project: projectName, path: createdPath }
-            : `Initialized project at ${createdPath}`,
+            ? {
+                success: true,
+                project: projectName,
+                path: createdPath,
+                guidance: guidanceResult
+                  ? {
+                      installed: guidanceResult.installed.length,
+                      updated: guidanceResult.updated.length,
+                      skipped: guidanceResult.skipped.length
+                    }
+                  : "skipped"
+              }
+            : `Initialized project at ${createdPath}${guidanceResult ? `\nGuidance installed: ${summarizeGuidanceDiff(guidanceResult)}` : "\nGuidance install skipped"}`,
           options.json
         );
       } catch (error) {
@@ -143,11 +162,29 @@ export function buildCli(): Command {
         const controlPlane = new ForgeControlPlane(process.cwd());
         const result = await controlPlane.planValidate(resolve(options.file));
         if (!result.valid) {
-          output(options.json ? result : `Plan invalid (${String(result.issues.length)} issues)`, options.json);
+          const hasLegacyIssue = result.issues.some((issue) => issue.code === "legacy_spec_version");
+          const message = hasLegacyIssue
+            ? "Plan invalid: legacy spec detected. Run 'forge plan migrate --file <path> --write'."
+            : `Plan invalid (${String(result.issues.length)} issues)`;
+          output(options.json ? result : message, options.json);
           process.exit(ExitCode.ValidationFailed);
         }
 
         output(options.json ? result : "Plan valid", options.json);
+      } catch (error) {
+        fail(error);
+      }
+    });
+
+  plan
+    .command("migrate")
+    .requiredOption("--file <path>", "plan path")
+    .option("--write", "write migrated plan to disk", false)
+    .option("--json", "machine output")
+    .action(async (options: JsonFlag & { file: string; write: boolean }) => {
+      try {
+        const result = await migratePlanFile(options.file, options.write);
+        output(options.json ? result : formatMigrationSummary(result), options.json);
       } catch (error) {
         fail(error);
       }
@@ -171,6 +208,27 @@ export function buildCli(): Command {
         }
 
         output(options.json ? result : result.message, options.json);
+      } catch (error) {
+        fail(error);
+      }
+    });
+
+  const workflow = program.command("workflow");
+
+  workflow
+    .command("check")
+    .requiredOption("--plan <path>", "plan path")
+    .option("--base-ref <ref>", "git base ref for changed files")
+    .option("--json", "machine output")
+    .action(async (options: JsonFlag & { plan: string; baseRef?: string }) => {
+      try {
+        const result = await runWorkflowCheck(process.cwd(), resolve(options.plan), options.baseRef);
+        if (!result.valid) {
+          output(options.json ? result : formatWorkflowCheckSummary(result), options.json);
+          process.exit(ExitCode.ValidationFailed);
+        }
+
+        output(options.json ? result : formatWorkflowCheckSummary(result), options.json);
       } catch (error) {
         fail(error);
       }

@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo "testing gate passed"
+npm run test && npm run typecheck && npm run lint

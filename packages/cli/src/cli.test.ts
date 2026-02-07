@@ -10,5 +10,6 @@ describe("cli", () => {
     expect(names).toContain("install-guidance");
     expect(names).toContain("plan");
     expect(names).toContain("run");
+    expect(names).toContain("workflow");
   });
 });

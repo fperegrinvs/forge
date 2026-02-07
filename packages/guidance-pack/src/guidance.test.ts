@@ -7,6 +7,7 @@ import {
   discoverSkills,
   getBundledGuidanceRoot,
   installGuidance,
+  loadBundledWorkflowPolicy,
   resolveAgentsPrecedence
 } from "./guidance.js";
 
@@ -30,5 +31,10 @@ describe("guidance pack", () => {
     const result = await installGuidance(target);
     expect(result.installed.length).toBeGreaterThan(0);
     expect(await exists(join(target, "manifest.json"))).toBe(true);
+  });
+
+  it("loads bundled workflow policy", async () => {
+    const policy = await loadBundledWorkflowPolicy();
+    expect(policy.version).toBeDefined();
   });
 });

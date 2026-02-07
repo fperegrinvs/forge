@@ -9,12 +9,15 @@
   ],
   "scripts": {
     "preflight": "./scripts/bootstrap-toolchain.sh --check",
+    "workflow:sync": "node scripts/sync-workflow-assets.mjs",
+    "workflow:check-sync": "node scripts/check-workflow-sync.mjs",
+    "workflow:check": "npm run build --workspace @forge/cli && node packages/cli/dist/bin.js workflow check --plan plans/forge-monorepo-v1.plan.json",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
     "test:desktop": "vitest run apps/desktop/src/**/*.test.ts",
-    "verify": "npm run typecheck && npm run lint && npm run test",
+    "verify": "npm run workflow:check-sync && npm run typecheck && npm run lint && npm run test && npm run workflow:check",
     "dev:desktop": "npm --workspace @forge/desktop run dev",
     "docs:check": "node scripts/docs-check.mjs"
   },
