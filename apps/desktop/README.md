@@ -9,6 +9,7 @@ From the repo root:
 ```bash
 bun run --filter @forge/desktop dev
 bun run --filter @forge/desktop dev:singleport
+bun run dev:desktop:tauri
 bun run --filter @forge/desktop build
 bun run --filter @forge/desktop test
 bun run --filter @forge/desktop typecheck
