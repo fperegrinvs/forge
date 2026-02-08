@@ -620,6 +620,13 @@ export function buildCli(): Command {
 
         writeLine({ type: "codex.session.started", at: new Date().toISOString() });
 
+        const baseRunContext = {
+          taskId: "codex-session",
+          workingDirectory: process.cwd(),
+          allowedTools: [] as string[],
+          approvalMode: process.stdin.isTTY ? ("suggest" as const) : ("full-auto" as const)
+        };
+
         try {
           const skillsDir = join(process.cwd(), "skills");
           const preflight = await registerCodexSkills(skillsDir, process.cwd());
@@ -639,11 +646,8 @@ export function buildCli(): Command {
         if (typeof options.autoSkill === "string" && options.autoSkill.trim()) {
           const skillInvocation = `$${options.autoSkill.trim()}`;
           const handle = await adapter.startRun({
-            taskId: "codex-session",
             prompt: skillInvocation,
-            workingDirectory: process.cwd(),
-            allowedTools: [],
-            approvalMode: process.stdin.isTTY ? "suggest" : "full-auto"
+            ...baseRunContext
           });
 
           for await (const event of adapter.streamEvents(handle.runId)) {
@@ -668,11 +672,8 @@ export function buildCli(): Command {
           }
 
           const handle = await adapter.startRun({
-            taskId: "codex-session",
             prompt: trimmed,
-            workingDirectory: process.cwd(),
-            allowedTools: [],
-            approvalMode: process.stdin.isTTY ? "suggest" : "full-auto"
+            ...baseRunContext
           });
 
           for await (const event of adapter.streamEvents(handle.runId)) {
