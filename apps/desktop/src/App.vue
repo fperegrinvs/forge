@@ -58,27 +58,12 @@
 
                   <div class="d-flex flex-wrap ga-2">
                     <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" @click="showNewPlan = true">New Plan</v-btn>
-                    <v-btn color="primary" variant="outlined" @click="onRunNextStream">Run</v-btn>
+                    <v-btn color="primary" variant="outlined" :disabled="streaming" @click="onWorkflowAutoStream">Run</v-btn>
                     <v-btn color="secondary" variant="outlined" @click="onOpenEvidence">Open Evidence</v-btn>
                   </div>
 
                   <div class="d-flex flex-wrap ga-2 align-center mt-3">
-                    <v-text-field
-                      v-model="streamInput"
-                      label="Send input to LLM (stream mode)"
-                      density="comfortable"
-                      :disabled="!streaming || !streamId"
-                      hide-details
-                      @keyup.enter="onSendStreamInput"
-                    />
-                    <v-btn
-                      color="primary"
-                      variant="outlined"
-                      :disabled="!streaming || !streamId || !streamInput.trim()"
-                      @click="onSendStreamInput"
-                    >
-                      Send
-                    </v-btn>
+                    <v-switch v-model="pushEnabled" density="comfortable" hide-details label="Push after each task" />
                     <v-btn color="secondary" variant="outlined" :disabled="!streaming || !streamId" @click="onCancelStream">
                       Cancel
                     </v-btn>
@@ -100,7 +85,7 @@
                   <h2 class="text-h6 mb-2">Current Task</h2>
                   <p><strong>ID:</strong> {{ current.taskId || "-" }}</p>
                   <p><strong>Status:</strong> {{ current.state || "-" }}</p>
-                  <p><strong>Run ID:</strong> {{ current.runId || "-" }}</p>
+                  <p><strong>Phase:</strong> {{ current.phase || "-" }}</p>
                   <p><strong>External Run ID:</strong> {{ current.externalRunId || "-" }}</p>
                   <p><strong>Resume:</strong> {{ current.resumeCommand || "-" }}</p>
                   <p><strong>Stream ID:</strong> {{ streamId || "-" }}</p>
@@ -113,7 +98,7 @@
                     <v-list-item
                       v-for="ts in selectedPlanStatuses"
                       :key="ts.id"
-                      :prepend-icon="ts.state === 'completed' ? 'mdi-check-circle' : ts.state === 'running' ? 'mdi-play-circle' : ts.state === 'failed' ? 'mdi-alert-circle' : ts.state === 'paused' ? 'mdi-pause-circle' : 'mdi-clock-outline'"
+                      :prepend-icon="ts.state === 'completed' ? 'mdi-check-circle' : ts.state === 'pending' ? 'mdi-clock-outline' : 'mdi-play-circle'"
                       :title="ts.id"
                       :subtitle="ts.state"
                     />
@@ -344,6 +329,34 @@
         </v-window>
       </v-container>
     </v-main>
+
+    <v-dialog v-model="userInputOpen" max-width="700">
+      <v-card class="pa-4">
+        <h2 class="text-h6 mb-3">Codex Needs Input</h2>
+        <div v-for="q in userInputQuestions" :key="q.id" class="mb-4">
+          <div v-if="q.header" class="text-subtitle-2 mb-1">{{ q.header }}</div>
+          <div class="text-body-2 mb-2">{{ q.question }}</div>
+          <v-radio-group v-model="userInputSelectedByQuestionId[q.id]" density="comfortable" hide-details>
+            <v-radio
+              v-for="opt in q.options"
+              :key="opt.label"
+              :label="opt.description ? `${opt.label} - ${opt.description}` : opt.label"
+              :value="opt.label"
+            />
+          </v-radio-group>
+          <v-text-field
+            v-if="q.options.find((o) => o.label === userInputSelectedByQuestionId[q.id])?.isOther"
+            v-model="userInputOtherTextByQuestionId[q.id]"
+            label="Other"
+            density="comfortable"
+          />
+        </div>
+        <div class="d-flex ga-2 justify-end">
+          <v-btn variant="text" @click="cancelUserInput">Cancel</v-btn>
+          <v-btn color="primary" @click="submitUserInput">Submit</v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
   </v-app>
 </template>
 
@@ -367,9 +380,9 @@ import {
   plansStatus,
   projectGetGuidanceStatus,
   projectInstallGuidance,
-  runNextStreamCancel,
-  runNextStreamInput,
-  runNextStreamUrl,
+  workflowAutoCancel,
+  workflowAutoPromptRespond,
+  workflowAutoStreamUrl,
   selectFile,
   selectFolder,
   type InstalledPack,
@@ -378,7 +391,6 @@ import {
   type PhaseGateBindings,
   type PlanFileEntry,
   type ProjectGuidanceStatus,
-  type RunNextResult,
   type TaskStatus,
   type ValidationIssue
 } from "./composables/useControlPlane";
@@ -410,6 +422,9 @@ const logs = ref<string[]>([]);
 const evidence = ref<string[]>([]);
 
 const LAST_PROJECT_ROOT_KEY = "forge.desktop.lastProjectRoot";
+const PUSH_AFTER_TASK_KEY = "forge.desktop.pushAfterTask";
+
+const pushEnabled = ref(false);
 
 const guidanceStatus = ref<ProjectGuidanceStatus>();
 const guidanceError = ref<string>("");
@@ -542,14 +557,22 @@ function syncPackSelection(): void {
   selectedPackPath.value = (matchingInstalled ?? versions[0]!).path;
 }
 
-const current = reactive<RunNextResult>({
+type WorkflowAutoUiState = {
+  state: "idle" | "running" | "paused" | "completed" | "failed";
+  taskId?: string;
+  phase?: string;
+  externalRunId?: string;
+  resumeCommand?: string;
+  message: string;
+};
+
+const current = reactive<WorkflowAutoUiState>({
   state: "idle",
   message: "Not started"
 });
 
 const streaming = ref(false);
 const streamId = ref("");
-const streamInput = ref("");
 let eventSource: EventSource | null = null;
 
 type LiveOutputSegment = {
@@ -694,13 +717,32 @@ watch(tab, (newTab) => {
   }
 });
 
+function loadPushSetting(): void {
+  try {
+    const raw = localStorage.getItem(`${PUSH_AFTER_TASK_KEY}:${projectRoot.value}`) ?? "";
+    pushEnabled.value = raw === "true";
+  } catch {
+    pushEnabled.value = false;
+  }
+}
+
 watch(projectRoot, () => {
+  loadPushSetting();
+
   // When switching projects, refresh pack + guidance context automatically.
   onRefreshGuidance();
   onListInstalledPacks();
 
   if (selectedPackPath.value) {
     void loadSelectedPackDetails();
+  }
+});
+
+watch(pushEnabled, (value) => {
+  try {
+    localStorage.setItem(`${PUSH_AFTER_TASK_KEY}:${projectRoot.value}`, value ? "true" : "false");
+  } catch {
+    // best-effort
   }
 });
 
@@ -859,7 +901,56 @@ function pushLog(line: string): void {
   }
 }
 
-async function onRunNextStream(): Promise<void> {
+type UserInputOption = { label: string; description?: string; isOther?: boolean };
+type UserInputQuestion = { id: string; header?: string; question: string; options: UserInputOption[] };
+
+const userInputOpen = ref(false);
+const userInputRequestId = ref("");
+const userInputQuestions = ref<UserInputQuestion[]>([]);
+const userInputSelectedByQuestionId = ref<Record<string, string>>({});
+const userInputOtherTextByQuestionId = ref<Record<string, string>>({});
+
+function openUserInput(requestId: string, questions: UserInputQuestion[]): void {
+  userInputRequestId.value = requestId;
+  userInputQuestions.value = questions;
+  userInputSelectedByQuestionId.value = {};
+  userInputOtherTextByQuestionId.value = {};
+  for (const q of questions) {
+    const first = q.options[0]?.label ?? "";
+    if (first) userInputSelectedByQuestionId.value[q.id] = first;
+  }
+  userInputOpen.value = true;
+}
+
+function closeUserInput(): void {
+  userInputOpen.value = false;
+  userInputRequestId.value = "";
+  userInputQuestions.value = [];
+  userInputSelectedByQuestionId.value = {};
+  userInputOtherTextByQuestionId.value = {};
+}
+
+async function cancelUserInput(): Promise<void> {
+  closeUserInput();
+  await onCancelStream();
+}
+
+async function submitUserInput(): Promise<void> {
+  if (!streamId.value || !userInputRequestId.value) return;
+  const answers: Record<string, { answers: string[] }> = {};
+  for (const q of userInputQuestions.value) {
+    const selected = userInputSelectedByQuestionId.value[q.id] ?? "";
+    const option = q.options.find((o) => o.label === selected);
+    const value =
+      option?.isOther === true ? (userInputOtherTextByQuestionId.value[q.id] ?? "").trim() || selected : selected;
+    answers[q.id] = { answers: value ? [value] : [] };
+  }
+  await workflowAutoPromptRespond(streamId.value, userInputRequestId.value, answers);
+  pushLog(`  [prompt] responded to ${userInputRequestId.value}`);
+  closeUserInput();
+}
+
+async function onWorkflowAutoStream(): Promise<void> {
   stopStream();
   clearLiveOutput();
 
@@ -872,17 +963,16 @@ async function onRunNextStream(): Promise<void> {
 
   current.state = "running";
   current.taskId = undefined;
-  current.runId = undefined;
+  current.phase = undefined;
   current.externalRunId = undefined;
   current.resumeCommand = undefined;
-  current.message = "Running (stream)...";
+  current.message = "Running (workflow auto)...";
   streamId.value = "";
-  streamInput.value = "";
   streaming.value = true;
 
-  pushLog("Run (stream) -> started");
+  pushLog("Workflow auto (stream) -> started");
 
-  const url = runNextStreamUrl(projectRoot.value, planPath.value, adapter.value);
+  const url = workflowAutoStreamUrl(projectRoot.value, planPath.value, adapter.value, pushEnabled.value);
   eventSource = new EventSource(url);
 
   eventSource.addEventListener("message", (event) => {
@@ -917,6 +1007,9 @@ async function onRunNextStream(): Promise<void> {
         const tool = String(e.tool ?? "tool");
         const status = String(e.status ?? "");
         appendLiveOutput("system", `[tool] ${tool}${status ? ` ${status}` : ""}\n`);
+      } else if (e?.type === "run.user_input.requested") {
+        openUserInput(String(e.requestId ?? ""), (e.questions ?? []) as UserInputQuestion[]);
+        appendLiveOutput("system", `[prompt] waiting for user input (${String(e.requestId ?? "")})\n`);
       } else if (e?.type === "run.failed") {
         appendLiveOutput("stderr", `[failed] ${String(e.reason ?? "")}\n`);
       } else if (e?.type) {
@@ -925,34 +1018,24 @@ async function onRunNextStream(): Promise<void> {
       return;
     }
 
-    if (type === "run.next.result") {
-      const result = parsed.result as RunNextResult | undefined;
-      if (result) {
-        current.state = result.state;
-        current.taskId = result.taskId;
-        current.runId = result.runId;
-        current.externalRunId = result.externalRunId;
-        current.resumeCommand = result.resumeCommand;
-        current.message = result.message;
-        pushLog(`Run (stream) -> ${result.message}`);
-        if (result.runId) pushLog(`  runId: ${result.runId}`);
-        if (result.externalRunId) pushLog(`  externalRunId: ${result.externalRunId}`);
-        if (result.resumeCommand) pushLog(`  resume: ${result.resumeCommand}`);
-        if (result.classification) pushLog(`  classification: ${result.classification}`);
-        if (result.checksSummary?.length) {
-          for (const check of result.checksSummary) {
-            pushLog(`  ${check}`);
-          }
-        }
-        if (result.llmOutput?.length) {
-          pushLog("  adapter output (tail):");
-          for (const line of result.llmOutput) {
-            pushLog(`    ${line}`);
-          }
-        }
-      } else {
-        pushLog("Run (stream) -> missing result payload");
-      }
+    if (type === "workflow.auto.step") {
+      const taskId = String(parsed.taskId ?? "");
+      const phase = String(parsed.phase ?? "");
+      current.taskId = taskId || current.taskId;
+      current.phase = phase || current.phase;
+      current.message = taskId && phase ? `Running ${taskId} (${phase})` : "Running...";
+      return;
+    }
+
+    if (type === "workflow.auto.paused" || type === "workflow.auto.completed") {
+      const step = parsed.step ?? {};
+      current.state = step.state === "paused" ? "paused" : step.state === "completed" ? "completed" : current.state;
+      current.taskId = typeof step.taskId === "string" ? step.taskId : current.taskId;
+      current.phase = typeof step.phase === "string" ? step.phase : current.phase;
+      current.externalRunId = typeof step.externalRunId === "string" ? step.externalRunId : undefined;
+      current.resumeCommand = typeof step.resumeCommand === "string" ? step.resumeCommand : undefined;
+      current.message = typeof step.message === "string" ? step.message : current.message;
+      pushLog(`Workflow auto (stream) -> ${current.message}`);
       stopStream();
       return;
     }
@@ -966,29 +1049,17 @@ async function onRunNextStream(): Promise<void> {
   });
 
   eventSource.addEventListener("error", () => {
-    pushLog("Run (stream) -> SSE error/disconnected");
+    pushLog("Workflow auto (stream) -> SSE error/disconnected");
   });
-}
-
-async function onSendStreamInput(): Promise<void> {
-  const text = streamInput.value.trim();
-  if (!text || !streamId.value) return;
-  try {
-    await runNextStreamInput(streamId.value, text);
-    pushLog(`  [input] ${text}`);
-    streamInput.value = "";
-  } catch (error) {
-    pushLog(`  [input error] ${String(error)}`);
-  }
 }
 
 async function onCancelStream(): Promise<void> {
   if (!streamId.value) return;
   try {
-    await runNextStreamCancel(streamId.value);
-    pushLog("Run (stream) -> cancel requested");
+    await workflowAutoCancel(streamId.value);
+    pushLog("Workflow auto (stream) -> cancel requested");
   } catch (error) {
-    pushLog(`Run (stream) -> cancel error: ${String(error)}`);
+    pushLog(`Workflow auto (stream) -> cancel error: ${String(error)}`);
   } finally {
     stopStream();
   }

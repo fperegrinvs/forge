@@ -85,10 +85,11 @@ pub fn run_forge_json(app: &AppHandle, cwd: &Path, args: &[String]) -> Result<se
     .map_err(|error| format!("forge did not return valid JSON: {error}. stdout: {}", stdout.trim()))
 }
 
-pub fn spawn_forge_stream(
+pub fn spawn_forge_stream_with_env(
   app: &AppHandle,
   cwd: &Path,
   args: &[String],
+  extra_env: &[(&str, &str)],
 ) -> Result<tokio::process::Child, String> {
   let (bin, base_args) = resolve_forge_command(app);
   let mut cmd = tokio::process::Command::new(&bin);
@@ -99,6 +100,10 @@ pub fn spawn_forge_stream(
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());
+
+  for (k, v) in extra_env {
+    cmd.env(k, v);
+  }
 
   cmd.spawn()
     .map_err(|error| format!("failed to spawn forge command {bin:?}: {error}"))

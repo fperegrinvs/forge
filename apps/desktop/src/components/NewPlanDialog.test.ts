@@ -76,8 +76,8 @@ describe("NewPlanDialog adapter-specific instructions", () => {
     // Given the codex adapter
     // When getting the skill invocation
     const result = getSkillInvocation("codex");
-    // Then it returns a mention with description prompt
-    expect(result).toBe("Mention `$plan-guided` and describe your feature");
+    // Then it indicates the guided flow starts automatically
+    expect(result).toBe("Guided plan creation starts automatically");
   });
 
   it("falls back to slash command for unknown adapters", () => {
@@ -95,15 +95,8 @@ describe("new plan spawn config", () => {
     expect(config).toEqual({ command: "claude", cwd: "/tmp/project" });
   });
 
-  it("builds codex config with TERM/env and no-alt-screen", () => {
+  it("builds default config for other adapters", () => {
     const config = buildNewPlanSpawnConfig("codex", "/tmp/project");
-    expect(config.command).toBe("codex");
-    expect(config.cwd).toBe("/tmp/project");
-    expect(config.args).toEqual(["--no-alt-screen"]);
-    expect(config.env).toEqual({
-      TERM: "xterm-256color",
-      COLORTERM: "truecolor",
-      RUST_BACKTRACE: "1"
-    });
+    expect(config).toEqual({ command: "codex", cwd: "/tmp/project" });
   });
 });

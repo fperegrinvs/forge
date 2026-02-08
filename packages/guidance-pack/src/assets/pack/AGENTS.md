@@ -14,7 +14,11 @@ Workflow policy version: 1.2.0
 - Never commit or push directly to `main`. Work on a `codex/*` branch and open a PR.
 
 ## Canonical Gates
-- gate:spec -> bun run typecheck && bun run test
+- gate:spec -> bun run typecheck
+if bun run test; then
+  echo "Spec gate requires RED tests (tests must fail before implementation)." >&2
+  exit 1
+fi
 - gate:green -> bun run test && bun run typecheck && bun run lint
 - gate:refactor -> bun run test && bun run typecheck && bun run lint
 - gate:architecture -> bun run architecture:check

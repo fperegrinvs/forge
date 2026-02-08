@@ -650,12 +650,12 @@ When a task fails or the user interrupts, recovery is mediated through the files
 
 **How recovery works:**
 
-1. The orchestrator runs each task via the agent's non-interactive CLI (e.g., `claude -p` or `codex exec`), capturing the session ID.
+1. The orchestrator runs each task via the agent's machine interface (e.g., `claude -p` or Codex `app-server`), capturing a resume token when available.
 2. Agent output streams to the user's terminal in real time.
 3. If something goes wrong (gate failure, user interrupt, context overflow):
-   - The orchestrator saves the session ID and current task state.
-   - The user can open an interactive session using the saved session ID (`claude --resume <id>` or `codex resume <id>`) to inspect what happened and manually fix files.
-   - The user's interactive session is a **repair tool** — they fix files, then exit.
+   - The orchestrator saves the resume token (if supported) and current task state.
+   - Claude Code: the user can open an interactive session using the saved session ID (`claude --resume <id>`) to inspect what happened and manually fix files.
+   - Codex app-server: current implementation does not support interactive resume from a persisted thread; recovery is filesystem-mediated (fix files, rerun).
 4. When the user signals readiness (`forge resume`), the orchestrator starts a **fresh** programmatic session for the next task, reading the current filesystem state.
 
 The orchestrator and the user never share a live agent session. They share a filesystem and git history. This avoids the fragile problem of two processes trying to coordinate inside a single agent context, and it means a corrupted or overflowed context from a failed task never poisons subsequent work.
@@ -670,14 +670,14 @@ execution:
 
 **Agent runtime compatibility:**
 
-| Capability | Claude Code | Codex CLI |
+| Capability | Claude Code | Codex app-server |
 |---|---|---|
-| Non-interactive execution | `claude -p` | `codex exec` |
-| Session ID capture | Agent SDK `init` event | Thread ID from SDK |
-| Interactive resume | `claude --resume <id>` | `codex resume <id>` |
-| Session fork | `--fork-session` | `codex fork --last` |
-| Output streaming | `--output-format stream-json` | `--json` (JSONL stream) |
-| Tool permissions | `--allowedTools` | `--approval-mode` |
+| Non-interactive execution | `claude -p` | `codex app-server` |
+| Session ID capture | Agent SDK `init` event | Thread ID (not yet persisted for resume) |
+| Interactive resume | `claude --resume <id>` | Not supported (rerun with filesystem state) |
+| Session fork | `--fork-session` | New thread |
+| Output streaming | `--output-format stream-json` | JSON-RPC notifications (JSONL) |
+| Tool permissions | `--allowedTools` | `approvalPolicy` |
 
 **Known limitation:** In Claude Code's non-interactive mode, if a single tool call exceeds the context limit, the session becomes irrecoverable (no programmatic equivalent of interactive mode's Esc+Esc rewind). The orchestrator mitigates this by keeping tasks small (enforced by plan checker size limits) and by providing the filesystem recovery path as a fallback.
 
@@ -892,7 +892,7 @@ config:
     runtime: claude-code    # claude-code | codex
     # Runtime-specific settings are derived from the runtime choice
     # claude-code: uses `claude -p`, `--resume`, `--allowedTools`
-    # codex: uses `codex exec`, `codex resume`, `--approval-mode`
+    # codex: uses `codex app-server` (JSON-RPC), `approvalPolicy`
 
   git:
     commit_per_task: true

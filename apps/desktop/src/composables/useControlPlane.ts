@@ -93,23 +93,29 @@ export async function planValidate(projectRoot: string, planPath: string): Promi
   });
 }
 
-export function runNextStreamUrl(projectRoot: string, planPath: string, adapter: "codex" | "claude"): string {
-  const url = new URL("/api/run/next/stream", window.location.origin);
+export function workflowAutoStreamUrl(
+  projectRoot: string,
+  planPath: string,
+  adapter: "codex" | "claude",
+  push: boolean
+): string {
+  const url = new URL("/api/workflow/auto/stream", window.location.origin);
   url.searchParams.set("projectRoot", projectRoot);
   url.searchParams.set("planPath", planPath);
   url.searchParams.set("adapter", adapter);
+  url.searchParams.set("push", push ? "true" : "false");
   return url.toString();
 }
 
-export async function runNextStreamInput(streamId: string, text: string): Promise<boolean> {
-  return await apiJson<boolean>("/api/run/next/input", {
+export async function workflowAutoPromptRespond(streamId: string, requestId: string, answers: unknown): Promise<boolean> {
+  return await apiJson<boolean>("/api/workflow/auto/prompt/respond", {
     method: "POST",
-    body: JSON.stringify({ streamId, text })
+    body: JSON.stringify({ streamId, requestId, answers })
   });
 }
 
-export async function runNextStreamCancel(streamId: string): Promise<boolean> {
-  return await apiJson<boolean>("/api/run/next/cancel", {
+export async function workflowAutoCancel(streamId: string): Promise<boolean> {
+  return await apiJson<boolean>("/api/workflow/auto/cancel", {
     method: "POST",
     body: JSON.stringify({ streamId })
   });
@@ -120,6 +126,35 @@ export async function getEvidence(projectRoot: string, taskId: string): Promise<
   url.searchParams.set("projectRoot", projectRoot);
   url.searchParams.set("taskId", taskId);
   return await apiJson<string[]>(url.toString(), { method: "GET" });
+}
+
+export function codexSessionStreamUrl(projectRoot: string): string {
+  const url = new URL("/api/codex/session/stream", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  // Desktop New Plan (Codex) should start guided planning automatically.
+  url.searchParams.set("autoSkill", "plan-guided");
+  return url.toString();
+}
+
+export async function codexSessionSend(streamId: string, text: string): Promise<boolean> {
+  return await apiJson<boolean>("/api/codex/session/send", {
+    method: "POST",
+    body: JSON.stringify({ streamId, text })
+  });
+}
+
+export async function codexSessionPromptRespond(streamId: string, requestId: string, answers: unknown): Promise<boolean> {
+  return await apiJson<boolean>("/api/codex/session/prompt/respond", {
+    method: "POST",
+    body: JSON.stringify({ streamId, requestId, answers })
+  });
+}
+
+export async function codexSessionCancel(streamId: string): Promise<boolean> {
+  return await apiJson<boolean>("/api/codex/session/cancel", {
+    method: "POST",
+    body: JSON.stringify({ streamId })
+  });
 }
 
 export async function projectGetGuidanceStatus(projectRoot: string): Promise<ProjectGuidanceStatus> {

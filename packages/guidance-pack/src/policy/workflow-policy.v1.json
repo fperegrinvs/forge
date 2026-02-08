@@ -111,7 +111,7 @@
   },
   "commands": {
     "gates": {
-      "spec": "bun run typecheck && bun run test",
+      "spec": "bun run typecheck\nif bun run test; then\n  echo \"Spec gate requires RED tests (tests must fail before implementation).\" >&2\n  exit 1\nfi",
       "green": "bun run test && bun run typecheck && bun run lint",
       "refactor": "bun run test && bun run typecheck && bun run lint",
       "architecture": "bun run architecture:check",

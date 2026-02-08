@@ -62,6 +62,11 @@ describe("cli", () => {
     const runCommands = run?.commands.map((command) => command.name()) ?? [];
     expect(runCommands).toContain("next");
     expect(runCommands).toContain("resume");
+
+    const workflow = cli.commands.find((command) => command.name() === "workflow");
+    const workflowCommands = workflow?.commands.map((command) => command.name()) ?? [];
+    expect(workflowCommands).toContain("check");
+    expect(workflowCommands).toContain("auto");
   });
 
   it("runs init with --skip-guidance and emits JSON", async () => {
@@ -152,6 +157,82 @@ describe("cli", () => {
       const sourceParsed = JSON.parse(guidanceSource) as { pack: { name: string; version: string; path: string } };
       expect(sourceParsed.pack.name).toBe("test-pack");
       expect(sourceParsed.pack.version).toBe("1.2.3");
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it("runs workflow auto in --dry-run mode and updates plan task status", async () => {
+    // Given a temp workspace with a valid plan file
+    const workspace = await mkdtemp(join(tmpdir(), "forge-cli-workflow-auto-"));
+    const planPath = join(workspace, "plan.json");
+    await writeFile(
+      planPath,
+      JSON.stringify(
+        {
+          metadata: {
+            project: "forge",
+            created: new Date().toISOString(),
+            last_updated: new Date().toISOString(),
+            spec_version: "v2",
+            approved: true
+          },
+          context: {
+            goals: ["x"],
+            constraints: ["y"],
+            tech_decisions: {},
+            architecture: "modulith"
+          },
+          tasks: [
+            {
+              id: "task-1",
+              task_type: "implementation",
+              name: "Task",
+              description: "do things",
+              files: ["a.ts"],
+              dependencies: [],
+              acceptance_criteria: ["ok"],
+              verification_command: "echo ok",
+              tests: { bdd_scenarios: ["Given x When y Then z"], property_invariants: [], contract_tests: [] },
+              documentation: { updates: ["docs/architecture.md"], decision_notes: "x" },
+              status: ""
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    // When workflow auto is executed in dry-run mode
+    const previous = process.cwd();
+    process.chdir(workspace);
+    try {
+      const { stdout, error } = await captureStdio(async () => {
+        const cli = buildCli();
+        await cli.parseAsync([
+          "node",
+          "forge",
+          "workflow",
+          "auto",
+          "--plan",
+          planPath,
+          "--adapter",
+          "codex",
+          "--dry-run",
+          "--json"
+        ]);
+      });
+
+      // Then it succeeds and reports completion
+      expect(error).toBeUndefined();
+      const parsed = JSON.parse(stdout) as { state: string };
+      expect(parsed.state).toBe("completed");
+
+      // And the plan file is updated to mark the task completed
+      const updated = JSON.parse(await readFile(planPath, "utf8")) as { tasks: Array<{ status?: string }> };
+      expect(updated.tasks[0]?.status).toBe("completed");
     } finally {
       process.chdir(previous);
     }

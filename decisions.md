@@ -10,7 +10,8 @@ Track repository-level technical decisions and rationale.
 - New Plan guided flow now detects and surfaces both newly created and updated plan files using `modifiedMs` from `/api/plans/list`.
 - Renamed the desktop adapter label from "claude" to "Claude Code" (internal value remains `claude`).
 - Claude adapter now runs Claude Code in non-interactive mode with explicit permissions/tool allowlist and better prompt/flag ordering; control-plane surfaces `claude --resume <id>` when a session ID is available.
-- Stabilized the Codex terminal used by New Plan: keep PTY master alive across WS reconnects, buffer initial output until WS attach, and (macOS only) wrap `codex` in `/usr/bin/script` to avoid Codex aborting on stdout writes; also improved WS error reporting and focus.
+- Codex Desktop integration is now based on `codex app-server` (JSON-RPC-over-JSONL) rather than the legacy Codex CLI/PTY terminal: New Plan uses `forge codex session --jsonl` streaming over HTTP SSE, and `tool/requestUserInput` prompts are surfaced as a rich modal (options + optional free-form "Other").
+- Codex New Plan automatically starts guided plan creation by spawning `forge codex session --auto-skill plan-guided` (Desktop passes `autoSkill=plan-guided` on the session stream URL) so the user does not need to type `$plan-guided`.
 - Added a pre-push git hook to run `typecheck` before pushing (configurable via env), shipped and auto-configured via guidance pack install when `.githooks/` is present and `core.hooksPath` is unset.
 - Desktop Packs tab now supports selecting a pack name, downloading latest, selecting a downloaded version, and installing/updating/replacing the project pack; switching pack names warns about mixed state unless force replace is used.
 - Guidance packs now provide default phase gate bindings via `manifest.json` (`default_phase_gate_bindings`) and ship policy-generated shell wrappers under `scripts/phase-gates/*.sh`.
@@ -18,6 +19,14 @@ Track repository-level technical decisions and rationale.
 - Desktop Packs tab now shows a selected pack's workflow phases/gates (as a simple ordered list) and allows binding per-phase validation scripts via a native file picker; bindings persist per project in `.forge/phase-gates.json`.
 - `forge install-guidance` now writes best-effort `.forge/guidance.json` metadata recording the installed pack name/version/path and timestamp; Desktop surfaces this as the project's pack source.
 - `forge run next --adapter codex` now performs a lightweight preflight to sync `skills/*/SKILL.md` into `.agents/skills/*/SKILL.md` so Codex-native skill discovery stays consistent.
+- Added `forge workflow auto --plan <path>`: a Ralph-loop style runner that advances tasks through spec→implement→refactor→document→commit, runs phase gate scripts, commits after each successful phase, and updates `tasks[].status` in the plan file.
+- Workflow auto uses `codex app-server` (JSON-RPC-over-JSONL) for Codex runs and an interactive Claude Code session wrapped via `/usr/bin/script` + hooks for lifecycle signaling.
+- `forge workflow auto` now prints a best-effort progress snapshot (per task + per phase markers) to stderr after each successful phase to keep terminal sessions readable while the agent streams output.
+- Codex app-server `tool/requestUserInput` is handled interactively when `stdin` is a TTY (prompt user to pick an option); in non-interactive mode it auto-selects the first option (best-effort) so automation does not hang.
+- Codex non-interactive prompt responses are routed via a `stdin` JSON protocol (listening on `data` events rather than a competing readline interface) so Desktop streams can handle both user messages and prompt responses reliably.
+- Claude hook bridge runner is now import-safe (only executes when run as a script), enabling unit tests while preserving hook CLI behavior; Claude PTY adapter gained small dependency injection points for faking spawn/interfaces in tests.
+- Claude hook callback HTTP server calls `unref()` after listening so it won’t keep the process alive on its own (important for tests and short-lived CLI runs).
+- Updated the spec gate wrapper script to succeed only when tests are RED (typecheck passes and test suite fails), aligning with the code-first BDD discipline.
 
 ## 2026-02-07 (unified Run action & schema improvements)
 - Unified "Run Next" and "Resume" into a single "Run" action: `runNext()` now auto-resumes paused state (sets task from "paused" to "pending", clears `pausedRun`) instead of returning early, eliminating the need for a separate resume step.
@@ -33,7 +42,7 @@ Track repository-level technical decisions and rationale.
 - `installGuidance` now registers skills as agent-native commands: `.claude/commands/<name>.md` for Claude Code (YAML frontmatter stripped) and `.agents/skills/<name>/SKILL.md` for Codex (full content preserved). This lets both agents discover Forge skills as native slash commands without manual setup.
 - Added `stripFrontmatter` helper to remove YAML frontmatter blocks from SKILL.md files, since Claude Code commands don't use frontmatter.
 - `registerSkillCommands` is idempotent — identical files are skipped via SHA-1 hash comparison, matching the existing `installGuidanceFromPackRoot` pattern.
-- NewPlanDialog instruction text is now adapter-conditional: Claude users see `/plan-guided`, Codex users see `$plan-guided`, matching each agent's native command syntax.
+- NewPlanDialog instruction text is adapter-conditional: Claude users see `/plan-guided`; Codex guided planning is auto-invoked so the UI no longer instructs the user to type `$plan-guided`.
 - NewPlanDialog instructions panel is collapsible via a chevron toggle, expanding the terminal to full dialog width when hidden.
 - NewPlanDialog is now resizable via CSS `resize: both` on the card, constrained to 90vw/90vh.
 

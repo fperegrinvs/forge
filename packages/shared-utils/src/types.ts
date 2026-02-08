@@ -13,6 +13,18 @@ export type AdapterEvent =
   | { type: "run.started"; runId: RunId; at: string }
   | { type: "run.output"; runId: RunId; stream: "stdout" | "stderr"; chunk: string; raw?: string; at: string }
   | { type: "run.tool"; runId: RunId; tool: string; status: "started" | "completed" | "failed"; at: string }
+  | {
+      type: "run.user_input.requested";
+      runId: RunId;
+      requestId: string;
+      questions: Array<{
+        id: string;
+        header?: string;
+        question: string;
+        options: Array<{ label: string; description?: string; isOther?: boolean }>;
+      }>;
+      at: string;
+    }
   | { type: "run.completed"; runId: RunId; exitCode: number; at: string }
   | { type: "run.failed"; runId: RunId; reason: string; at: string };
 

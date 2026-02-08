@@ -13,6 +13,8 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@forge/adapter-claude": "0.1.0",
+    "@forge/adapter-codex": "0.1.0",
     "@forge/check-runner": "0.1.0",
     "@forge/contracts": "0.1.0",
     "@forge/control-plane": "0.1.0",
