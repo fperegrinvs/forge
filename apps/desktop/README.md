@@ -25,6 +25,10 @@ Notes:
 - `bun run dev:desktop:tauri` is the recommended way to start Tauri in dev (it starts the watcher + `cargo tauri dev`).
 - `bun run dev:desktop:tauri:oneshot` runs a one-time frontend build then starts Tauri (no watch, single process after startup).
 
+## Plans
+
+- The "New Plan" guided flow detects both newly created and updated plan files in `plans/` using the `modifiedMs` timestamps returned by `/api/plans/list`.
+
 ## Packs + Guidance Updates
 
 Forge Desktop can download non-executable "packs" (starting with `forge-guidance-pack`) from GitHub Releases and install them into a selected project directory.

@@ -22,6 +22,7 @@ This repository implements Phase 0-2 of Forge componentization.
 5. Control-plane runs checks via check-runner based on `task_type`.
 6. Control-plane writes evidence artifacts to `.forge/evidence`.
 7. Desktop UI calls `/api/*` endpoints on the same origin (single-port app-server in Tauri).
+8. Desktop UI polls `/api/plans/list` and uses `modifiedMs` to surface both newly created and updated plan files during guided plan creation.
 
 ## Evidence Artifacts
 

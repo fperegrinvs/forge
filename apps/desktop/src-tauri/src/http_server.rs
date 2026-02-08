@@ -826,6 +826,7 @@ struct PlansListQuery {
 struct PlanFileEntry {
     filename: String,
     path: String,
+    modified_ms: u64,
 }
 
 fn list_plans(project_root: &str) -> Result<Vec<PlanFileEntry>, String> {
@@ -836,7 +837,7 @@ fn list_plans(project_root: &str) -> Result<Vec<PlanFileEntry>, String> {
 
     struct PlanWithTime {
         entry: PlanFileEntry,
-        modified: std::time::Duration,
+        modified_ms: u64,
     }
 
     let mut entries: Vec<PlanWithTime> = Vec::new();
@@ -858,25 +859,27 @@ fn list_plans(project_root: &str) -> Result<Vec<PlanFileEntry>, String> {
             None => continue,
         };
 
-        let modified = std::fs::metadata(&path)
+        let modified_ms = std::fs::metadata(&path)
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .unwrap_or(std::time::Duration::from_secs(0));
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
 
         entries.push(PlanWithTime {
             entry: PlanFileEntry {
                 filename,
                 path: path.to_string_lossy().to_string(),
+                modified_ms,
             },
-            modified,
+            modified_ms,
         });
     }
 
     // Newest first, stable tie-breaker by filename.
     entries.sort_by(|a, b| {
-        b.modified
-            .cmp(&a.modified)
+        b.modified_ms
+            .cmp(&a.modified_ms)
             .then_with(|| a.entry.filename.cmp(&b.entry.filename))
     });
 
@@ -921,6 +924,7 @@ mod plans_list_tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].filename, "b.json");
         assert_eq!(entries[1].filename, "a.json");
+        assert!(entries[0].modified_ms > entries[1].modified_ms);
 
         let _ = fs::remove_dir_all(&root);
     }

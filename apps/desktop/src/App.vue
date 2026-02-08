@@ -275,6 +275,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import CreateProjectDialog from "./components/CreateProjectDialog.vue";
 import NewPlanDialog from "./components/NewPlanDialog.vue";
 import LiveOutputPane from "./components/LiveOutputPane.vue";
+import { mergeDiscoveredPlans } from "./lib/mergeDiscoveredPlans.js";
 import {
   getCwd,
   getEvidence,
@@ -453,6 +454,7 @@ function appendLiveOutput(stream: LiveOutputSegment["stream"], text: string): vo
 type DiscoveredPlan = {
   filename: string;
   path: string;
+  modifiedMs: number;
   valid: boolean | null;
   validating: boolean;
   taskStatuses: TaskStatus[];
@@ -495,29 +497,31 @@ onMounted(async () => {
 async function pollPlans(): Promise<void> {
   try {
     const entries: PlanFileEntry[] = await plansList(projectRoot.value);
-    const existing = new Map(discoveredPlans.value.map((p) => [p.filename, p]));
-    const updated: DiscoveredPlan[] = entries.map((entry) => {
-      const prev = existing.get(entry.filename);
-      if (prev) return prev;
-      return { filename: entry.filename, path: entry.path, valid: null, validating: false, taskStatuses: [], issues: [] };
-    });
-    discoveredPlans.value = updated;
+    const merged = mergeDiscoveredPlans(discoveredPlans.value, entries, { guidedOpen: showNewPlan.value });
+    discoveredPlans.value = merged.plans;
+    if (showNewPlan.value && merged.updatedFilenames.length) {
+      for (const filename of merged.updatedFilenames) pushLog(`Plan updated during guided flow: ${filename}`);
+    }
 
-    // Auto-validate new plans
-    for (const plan of updated) {
+    // Auto-validate new or updated plans
+    for (const plan of discoveredPlans.value) {
       if (plan.valid === null && !plan.validating) {
         plan.validating = true;
+        const validatingForModifiedMs = plan.modifiedMs;
         planValidate(projectRoot.value, plan.path)
           .then((r) => {
+            if (plan.modifiedMs !== validatingForModifiedMs) return;
             plan.valid = r.valid;
             plan.issues = r.issues;
           })
           .catch((error) => {
+            if (plan.modifiedMs !== validatingForModifiedMs) return;
             plan.valid = false;
             plan.issues = [{ path: "", code: "validation_failed", message: String(error) }];
             pushLog(`Plan validation failed (${plan.filename}): ${String(error)}`);
           })
           .finally(() => {
+            if (plan.modifiedMs !== validatingForModifiedMs) return;
             plan.validating = false;
           });
       }

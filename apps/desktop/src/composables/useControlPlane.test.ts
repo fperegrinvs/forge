@@ -231,8 +231,8 @@ describe("useControlPlane", () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => [
-        { filename: "add-auth.json", path: "/project/plans/add-auth.json" },
-        { filename: "fix-bug.json", path: "/project/plans/fix-bug.json" }
+        { filename: "add-auth.json", path: "/project/plans/add-auth.json", modifiedMs: 1000 },
+        { filename: "fix-bug.json", path: "/project/plans/fix-bug.json", modifiedMs: 2000 }
       ]
     });
     // When plansList is called
@@ -245,6 +245,7 @@ describe("useControlPlane", () => {
     expect(result).toHaveLength(2);
     expect(result[0]!.filename).toBe("add-auth.json");
     expect(result[1]!.path).toBe("/project/plans/fix-bug.json");
+    expect(result[1]!.modifiedMs).toBe(2000);
   });
 
   it("plansStatus calls GET /api/plans/status and returns PlanStatusResult", async () => {

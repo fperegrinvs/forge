@@ -7,6 +7,7 @@ Track repository-level technical decisions and rationale.
 - Folder pickers no longer open twice when clicking "Browse" (stop click propagation on the append button).
 - Discovered plans are ordered newest-first (by file mtime descending) to surface the most likely plan.
 - Removed the explicit "Validate Plan" button; validation happens automatically in the background and "Run" blocks when invalid.
+- New Plan guided flow now detects and surfaces both newly created and updated plan files using `modifiedMs` from `/api/plans/list`.
 - Renamed the desktop adapter label from "claude" to "Claude Code" (internal value remains `claude`).
 - Claude adapter now runs Claude Code in non-interactive mode with explicit permissions/tool allowlist and better prompt/flag ordering; control-plane surfaces `claude --resume <id>` when a session ID is available.
 - Stabilized the Codex terminal used by New Plan: keep PTY master alive across WS reconnects, buffer initial output until WS attach, and (macOS only) wrap `codex` in `/usr/bin/script` to avoid Codex aborting on stdout writes; also improved WS error reporting and focus.
