@@ -921,6 +921,7 @@ mod plans_list_tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].filename, "b.json");
         assert_eq!(entries[1].filename, "a.json");
+        assert!(entries[0].modified_ms > entries[1].modified_ms);
 
         let _ = fs::remove_dir_all(&root);
     }
