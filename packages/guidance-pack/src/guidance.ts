@@ -191,7 +191,7 @@ export async function installGuidanceFromPackRoot(
           cwd: targetRoot,
           encoding: "utf8"
         });
-        const currentValue = current.status === 0 ? String(current.stdout || "").trim() : "";
+        const currentValue = current.status === 0 ? current.stdout.trim() : "";
 
         // Don't override custom hook paths; only set when unset or already pointing at .githooks.
         if (!currentValue || currentValue === ".githooks") {
