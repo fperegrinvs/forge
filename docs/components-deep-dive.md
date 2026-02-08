@@ -677,7 +677,7 @@ Exit criteria:
 
 1. [Codex AGENTS.md guidance](https://developers.openai.com/codex/guides/agents-md/)
 2. [Codex skills model](https://developers.openai.com/codex/skills)
-3. [Codex non-interactive mode (`codex exec`)](https://developers.openai.com/codex/noninteractive/)
+3. [Codex non-interactive mode (`codex exec`, legacy)](https://developers.openai.com/codex/noninteractive/)
 4. [Codex app-server for rich clients](https://developers.openai.com/codex/app-server)
 5. [Codex SDK](https://developers.openai.com/codex/sdk/)
 
