@@ -58,6 +58,8 @@ pub struct PackContent {
   pub phases: Vec<WorkflowPhase>,
   pub rules: Vec<String>,
   pub skills: Vec<String>,
+  #[serde(default)]
+  pub default_phase_gate_bindings: BTreeMap<String, String>,
 }
 
 fn parse_semver(value: &str) -> Option<(u64, u64, u64)> {
@@ -193,7 +195,7 @@ pub fn read_installed_packs(app_data_dir: &Path) -> Result<Vec<InstalledPack>, S
   Ok(installed)
 }
 
-fn read_pack_manifest(pack_dir: &Path) -> Result<(String, String), String> {
+fn read_pack_manifest(pack_dir: &Path) -> Result<(String, String, BTreeMap<String, String>), String> {
   let manifest_path = pack_dir.join("manifest.json");
   if !manifest_path.exists() {
     return Err("pack is missing manifest.json".to_string());
@@ -217,7 +219,24 @@ fn read_pack_manifest(pack_dir: &Path) -> Result<(String, String), String> {
   if name.is_empty() || version.is_empty() {
     return Err("manifest.json is missing required fields (name/version)".to_string());
   }
-  Ok((name, version))
+
+  let default_phase_gate_bindings = value
+    .get("default_phase_gate_bindings")
+    .and_then(|v| v.as_object())
+    .map(|object| {
+      let mut map = BTreeMap::new();
+      for (k, v) in object {
+        let key = k.trim().to_string();
+        let val = v.as_str().unwrap_or("").trim().to_string();
+        if !key.is_empty() && !val.is_empty() {
+          map.insert(key, val);
+        }
+      }
+      map
+    })
+    .unwrap_or_default();
+
+  Ok((name, version, default_phase_gate_bindings))
 }
 
 fn parse_yes_no(value: &str) -> bool {
@@ -400,7 +419,7 @@ pub fn read_pack_content(pack_dir: &Path) -> Result<PackContent, String> {
     ));
   }
 
-  let (name, version) = read_pack_manifest(pack_dir)?;
+  let (name, version, default_phase_gate_bindings) = read_pack_manifest(pack_dir)?;
 
   let phases = {
     let agents_path = pack_dir.join("AGENTS.md");
@@ -422,6 +441,7 @@ pub fn read_pack_content(pack_dir: &Path) -> Result<PackContent, String> {
     phases,
     rules,
     skills,
+    default_phase_gate_bindings,
   })
 }
 
@@ -1033,7 +1053,7 @@ Central directory entry #2:
     fs::create_dir_all(&dir).unwrap();
     fs::write(
       dir.join("manifest.json"),
-      r#"{"name":"forge-guidance-pack","version":"1.2.3"}"#,
+      r#"{"name":"forge-guidance-pack","version":"1.2.3","default_phase_gate_bindings":{"spec":"scripts/phase-gates/spec.sh"}}"#,
     )
     .unwrap();
     fs::write(
@@ -1077,6 +1097,13 @@ Central directory entry #2:
     // And rules/skills are listed
     assert_eq!(content.rules, vec!["testing".to_string()]);
     assert_eq!(content.skills, vec!["spec-bdd".to_string()]);
+    assert_eq!(
+      content
+        .default_phase_gate_bindings
+        .get("spec")
+        .map(|v| v.as_str()),
+      Some("scripts/phase-gates/spec.sh")
+    );
 
     let _ = fs::remove_dir_all(&dir);
   }

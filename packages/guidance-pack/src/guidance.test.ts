@@ -42,6 +42,31 @@ describe("guidance pack", () => {
     expect(await exists(join(target, "manifest.json"))).toBe(true);
   });
 
+  it("seeds .forge/phase-gates.json on install and preserves existing bindings", async () => {
+    // Given a fresh target directory
+    const target = await mkdtemp(join(tmpdir(), "forge-guidance-seed-"));
+
+    // When guidance is installed
+    await installGuidance(target);
+
+    // Then phase gate bindings are seeded
+    const seededPath = join(target, ".forge", "phase-gates.json");
+    expect(await exists(seededPath)).toBe(true);
+    const seeded = JSON.parse(await readFile(seededPath, "utf8")) as Record<string, string | null>;
+    expect(seeded.spec).toContain("scripts/phase-gates/spec.sh");
+
+    // Given a local custom binding
+    await mkdir(join(target, ".forge"), { recursive: true });
+    await writeFile(seededPath, JSON.stringify({ spec: "custom/spec.sh" }, null, 2), "utf8");
+
+    // When guidance is installed again
+    await installGuidance(target);
+
+    // Then existing bindings are preserved (never overwritten)
+    const reread = JSON.parse(await readFile(seededPath, "utf8")) as Record<string, string | null>;
+    expect(reread).toEqual({ spec: "custom/spec.sh" });
+  });
+
   it("skips identical files on re-install", async () => {
     const target = await mkdtemp(join(tmpdir(), "forge-guidance-test-"));
     await installGuidance(target);
@@ -120,6 +145,27 @@ describe("guidance pack", () => {
   it("loads bundled manifest", async () => {
     const manifest = await loadBundledManifest();
     expect(manifest).toBeTruthy();
+  });
+
+  it("bundled manifest provides default phase gate bindings and scripts exist", async () => {
+    // Given the bundled policy phases and bundled pack root
+    const root = getBundledGuidanceRoot();
+    const policy = await loadBundledWorkflowPolicy();
+    const phases = (policy.workflow as { phases?: unknown })?.phases;
+    expect(Array.isArray(phases)).toBe(true);
+
+    // When loading the manifest
+    const manifest = await loadBundledManifest();
+    const bindings = (manifest as { default_phase_gate_bindings?: unknown }).default_phase_gate_bindings;
+    expect(bindings).toBeTruthy();
+
+    // Then it contains a binding for each phase and the referenced script exists in the pack
+    for (const phase of phases as string[]) {
+      const rel = (bindings as Record<string, string>)[phase];
+      expect(typeof rel).toBe("string");
+      expect(rel).toContain("scripts/phase-gates/");
+      expect(await exists(join(root, rel))).toBe(true);
+    }
   });
 
   it("loads bundled workflow policy", async () => {

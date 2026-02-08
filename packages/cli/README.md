@@ -5,6 +5,7 @@ The public `forge` CLI. Wraps contracts/control-plane/templates and provides pla
 ## Notes
 
 - `forge install-guidance` installs guidance files into the current working directory and writes best-effort pack source metadata to `.forge/guidance.json` (when the pack has a `manifest.json`).
+- `forge install-guidance` also seeds `.forge/phase-gates.json` from the pack's `manifest.json` defaults when missing, and never overwrites an existing file.
 - `forge run next --adapter codex` performs a lightweight preflight that syncs Codex-native skills from `skills/*/SKILL.md` into `.agents/skills/*/SKILL.md` before running tasks.
 
 ## Commands
