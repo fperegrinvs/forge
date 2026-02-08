@@ -21,7 +21,7 @@
                 Describe the feature you want to build when prompted.
               </li>
               <li class="mb-2">
-                The agent will create a plan file in <code>plans/</code> inside your project.
+                The agent will create or update a plan file in <code>plans/</code> inside your project.
               </li>
               <li class="mb-2">
                 Click <strong>Done</strong> when finished.
@@ -36,9 +36,12 @@
               Starting terminal...
             </v-alert>
 
-            <v-alert v-for="plan in newPlans" :key="plan.filename" :type="plan.valid === false ? 'error' : 'success'" variant="tonal" class="mt-3">
+            <v-alert v-for="plan in changedPlans" :key="plan.filename" :type="plan.valid === false ? 'error' : 'success'" variant="tonal" class="mt-3">
               <div class="d-flex align-center">
-                <span>Plan detected: <strong>{{ plan.filename }}</strong></span>
+                <span>
+                  {{ plan.kind === "updated" ? "Plan updated" : "Plan detected" }}:
+                  <strong>{{ plan.filename }}</strong>
+                </span>
                 <v-chip
                   class="ml-2"
                   size="small"
@@ -92,7 +95,7 @@
       <v-card-actions class="flex-shrink-0">
         <v-spacer />
         <v-btn variant="text" @click="onClose">Cancel</v-btn>
-        <v-btn v-if="newPlans.length" color="success" @click="onUsePlan(newPlans[0])">Use Plan</v-btn>
+        <v-btn v-if="changedPlans.length" color="success" @click="onUsePlan(changedPlans[0])">Use Plan</v-btn>
         <v-btn color="primary" @click="onDone">Done</v-btn>
       </v-card-actions>
     </v-card>
@@ -105,10 +108,12 @@ import TerminalPanel from "./TerminalPanel.vue";
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
 import { getSkillInvocation } from "./planDialogInstructions";
 import { buildNewPlanSpawnConfig } from "./newPlanSpawnConfig";
+import { computeChangedPlans } from "../lib/plans.js";
 
 interface DiscoveredPlan {
   filename: string;
   path: string;
+  modifiedMs: number;
   valid: boolean | null;
   validating: boolean;
   taskStatuses: unknown[];
@@ -139,15 +144,13 @@ const dialogWidth = ref(1000);
 const dialogHeight = ref(600);
 const sessionId = ref<string>("");
 const error = ref<string>("");
-const initialPlanFilenames = ref<Set<string>>(new Set());
+const initialBaselineByFilename = ref<Map<string, number>>(new Map());
 
-const newPlans = computed(() =>
-  props.discoveredPlans.filter((p) => !initialPlanFilenames.value.has(p.filename))
-);
+const changedPlans = computed(() => computeChangedPlans(props.discoveredPlans, initialBaselineByFilename.value));
 
 watch(open, async (value) => {
   if (value) {
-    initialPlanFilenames.value = new Set(props.discoveredPlans.map((p) => p.filename));
+    initialBaselineByFilename.value = new Map(props.discoveredPlans.map((p) => [p.filename, p.modifiedMs]));
     error.value = "";
     sessionId.value = "";
     try {

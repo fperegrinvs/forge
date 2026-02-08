@@ -23,7 +23,16 @@ export type ChangedPlan = DiscoveredPlan & {
 export type BaselineByFilename = ReadonlyMap<string, number>;
 
 export function computeChangedPlans(plans: readonly DiscoveredPlan[], baseline: BaselineByFilename): ChangedPlan[] {
-  // Spec-phase stub: implement in the green phase.
-  return [];
+  const changed: ChangedPlan[] = [];
+  for (const plan of plans) {
+    const prev = baseline.get(plan.filename);
+    if (prev === undefined) {
+      changed.push({ ...plan, kind: "new" });
+      continue;
+    }
+    if (plan.modifiedMs > prev) {
+      changed.push({ ...plan, kind: "updated" });
+    }
+  }
+  return changed;
 }
-

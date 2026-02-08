@@ -176,7 +176,7 @@ export async function selectFolder(): Promise<string | null> {
   return result.path;
 }
 
-export type PlanFileEntry = { filename: string; path: string };
+export type PlanFileEntry = { filename: string; path: string; modifiedMs: number };
 export type TaskStatus = { id: string; state: string };
 export type PlanStatusResult = { tasks: TaskStatus[] };
 
