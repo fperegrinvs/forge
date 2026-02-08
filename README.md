@@ -54,6 +54,7 @@ Forge Desktop can download packs (from GitHub Releases) and install a selected p
 - `forge run next --plan <path>`
 - `forge run resume --plan <path> --run-id <id>`
 - `forge workflow check --plan <path>`
+- `forge workflow auto --plan <path> --adapter codex|claude`
 
 ## Workflow Enforcement
 

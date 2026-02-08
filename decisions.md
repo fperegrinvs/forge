@@ -18,6 +18,9 @@ Track repository-level technical decisions and rationale.
 - Desktop Packs tab now shows a selected pack's workflow phases/gates (as a simple ordered list) and allows binding per-phase validation scripts via a native file picker; bindings persist per project in `.forge/phase-gates.json`.
 - `forge install-guidance` now writes best-effort `.forge/guidance.json` metadata recording the installed pack name/version/path and timestamp; Desktop surfaces this as the project's pack source.
 - `forge run next --adapter codex` now performs a lightweight preflight to sync `skills/*/SKILL.md` into `.agents/skills/*/SKILL.md` so Codex-native skill discovery stays consistent.
+- Added `forge workflow auto --plan <path>`: a Ralph-loop style runner that advances tasks through spec→implement→refactor→document→commit, runs phase gate scripts, commits after each successful phase, and updates `tasks[].status` in the plan file.
+- Workflow auto uses `codex app-server` (JSON-RPC-over-JSONL) for Codex runs and an interactive Claude Code session wrapped via `/usr/bin/script` + hooks for lifecycle signaling.
+- Updated the spec gate wrapper script to succeed only when tests are RED (typecheck passes and test suite fails), aligning with the code-first BDD discipline.
 
 ## 2026-02-07 (unified Run action & schema improvements)
 - Unified "Run Next" and "Resume" into a single "Run" action: `runNext()` now auto-resumes paused state (sets task from "paused" to "pending", clears `pausedRun`) instead of returning early, eliminating the need for a separate resume step.
