@@ -183,4 +183,101 @@ rl.on("line", (line) => {
     // Then it completes successfully after auto-answering server requests
     expect(types).toContain("run.completed");
   });
+
+  it("emits a user_input.requested event when the server requests structured user input", async () => {
+    // Given a fake app-server that requests user input
+    const dir = await mkdtemp(join(tmpdir(), "forge-codex-appserver-fake-"));
+    const serverPath = join(dir, "server-userinput.mjs");
+    await writeFile(
+      serverPath,
+      `
+import { createInterface } from "node:readline";
+
+const rl = createInterface({ input: process.stdin });
+let initialized = false;
+let threadId = "thread-1";
+let turnId = "turn-1";
+
+let answered = false;
+
+function send(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
+
+function maybeComplete() {
+  if (!answered) return;
+  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [] } } });
+  process.exit(0);
+}
+
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") {
+    send({ id: msg.id, result: { userAgent: "fake" } });
+    return;
+  }
+  if (msg.method === "initialized") {
+    initialized = true;
+    return;
+  }
+  if (!initialized) {
+    send({ id: msg.id, error: { message: "not initialized" } });
+    return;
+  }
+  if (msg.method === "thread/start") {
+    send({ id: msg.id, result: { thread: { id: threadId } } });
+    return;
+  }
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: turnId, status: "inProgress", items: [] } } });
+    send({
+      id: 300,
+      method: "item/tool/requestUserInput",
+      params: {
+        questions: [
+          {
+            id: "q1",
+            question: "Pick one",
+            options: [{ label: "Option A" }, { label: "Other", isOther: true }]
+          }
+        ]
+      }
+    });
+    return;
+  }
+
+  if (msg && typeof msg === "object" && typeof msg.id !== "undefined" && typeof msg.method === "undefined") {
+    if (msg.id === 300) {
+      answered = true;
+      maybeComplete();
+      return;
+    }
+  }
+});
+      `.trim(),
+      "utf8"
+    );
+
+    const adapter = new CodexAppServerAdapter({
+      spawnCommand: "node",
+      spawnArgs: [serverPath]
+    });
+
+    const context: RunContext = {
+      taskId: "task-1",
+      prompt: "do the thing",
+      workingDirectory: dir,
+      allowedTools: [],
+      approvalMode: "full-auto"
+    };
+
+    // When a run is started and streamed
+    const handle = await adapter.startRun(context);
+    const eventTypes: string[] = [];
+    for await (const event of adapter.streamEvents(handle.runId)) {
+      eventTypes.push(event.type);
+      if (event.type === "run.failed") throw new Error(event.reason);
+    }
+
+    // Then it surfaces the structured prompt request as an adapter event
+    expect(eventTypes).toContain("run.user_input.requested");
+  });
 });
