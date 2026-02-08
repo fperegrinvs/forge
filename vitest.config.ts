@@ -85,7 +85,6 @@ export default defineConfig({
         "**/src/types.ts",
         "apps/**/src/main.ts",
         "packages/**/src/assets/**",
-        "packages/cli/src/bin.ts",
         "packages/guidance-pack/src/assets/**",
         "packages/templates/src/assets/**"
       ],

@@ -31,7 +31,7 @@ export async function validatePlanSchema(plan: unknown): Promise<PlanValidationR
       issues: [
         {
           path: "/metadata/spec_version",
-          message: `Legacy plan spec '${specVersion}' detected. Run 'forge plan migrate --file <path> --write'.`,
+          message: `Legacy plan spec '${specVersion}' detected. Use Forge Desktop to migrate this plan to '${CURRENT_PLAN_SPEC_VERSION}'.`,
           code: "legacy_spec_version"
         }
       ]

@@ -17,7 +17,7 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 - `@forge/adapter-codex`: Codex adapter implementation.
 - `@forge/adapter-claude`: Claude adapter implementation.
 - `@forge/control-plane`: Plan execution orchestration and evidence.
-- `@forge/cli`: Public `forge` CLI commands.
+- `@forge/sidecar`: Internal Desktop sidecar process (JSON over stdin/stdout).
 - `@forge/desktop`: Tauri + Vue orchestrator UI.
 
 ## Modules
@@ -30,7 +30,6 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 - `@forge/adapter-codex`: `packages/adapter-codex/README.md`
 - `@forge/adapter-claude`: `packages/adapter-claude/README.md`
 - `@forge/control-plane`: `packages/control-plane/README.md`
-- `@forge/cli`: `packages/cli/README.md`
 - `@forge/shared-utils`: `packages/shared-utils/README.md`
 
 ## Desktop Packs
@@ -44,18 +43,9 @@ Forge Desktop can download packs (from GitHub Releases) and install a selected p
 3. Synchronize workflow assets with `bun run workflow:sync`.
 4. Run `bun run verify`.
 
-## Core Commands
+## Interface
 
-- `forge init <project-name>`
-- `forge scaffold module <module-name>`
-- `forge install-guidance`
-- `forge plan validate --file <path>`
-- `forge plan migrate --file <path> --write`
-- `forge run next --plan <path>`
-- `forge run resume --plan <path> --run-id <id>`
-- `forge workflow check --plan <path>`
-- `forge workflow auto --plan <path> --adapter codex|claude`
-- `forge codex session`
+Forge is Desktop-only: use `@forge/desktop` (Tauri + Vue) as the user interface. The Desktop backend spawns an internal `@forge/sidecar` process for plan validation, guidance install, workflow execution, and Codex sessions.
 
 ## Workflow Enforcement
 

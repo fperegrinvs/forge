@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { validatePlanSchema } from "@forge/contracts";
-import { migratePlanFile, runWorkflowCheck } from "./workflow.js";
+import { migratePlanFile, runWorkflowCheck } from "./workflow-check.js";
 
 function git(cwd: string, ...args: string[]) {
   execFileSync("git", args, { cwd, stdio: "pipe" });

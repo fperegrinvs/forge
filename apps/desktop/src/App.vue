@@ -108,6 +108,18 @@
                 <v-card class="pa-4 mb-4">
                   <h2 class="text-h6 mb-2">Gate Results</h2>
                   <p>{{ validationSummary }}</p>
+                  <div v-if="hasLegacySpecIssue" class="d-flex flex-wrap ga-2 mt-2">
+                    <v-btn
+                      color="primary"
+                      variant="outlined"
+                      :loading="migratingPlan"
+                      :disabled="migratingPlan"
+                      prepend-icon="mdi-file-replace-outline"
+                      @click="onMigrateSelectedPlan"
+                    >
+                      Migrate Plan
+                    </v-btn>
+                  </div>
                   <v-list v-if="selectedPlanIssues.length" density="compact" class="mt-2">
                     <v-list-item
                       v-for="(issue, index) in selectedPlanIssues"
@@ -375,6 +387,7 @@ import {
   packsListInstalled,
   phaseGatesGet,
   phaseGatesPut,
+  planMigrate,
   planValidate,
   plansList,
   plansStatus,
@@ -627,6 +640,29 @@ const selectedPlanStatuses = computed(() => {
 const selectedPlanIssues = computed(() => {
   return selectedDiscoveredPlan.value?.issues ?? [];
 });
+
+const hasLegacySpecIssue = computed(() => selectedPlanIssues.value.some((issue) => issue.code === "legacy_spec_version"));
+const migratingPlan = ref(false);
+
+async function onMigrateSelectedPlan(): Promise<void> {
+  if (!planPath.value) return;
+  migratingPlan.value = true;
+  try {
+    const result = await planMigrate(projectRoot.value, planPath.value, true);
+    pushLog(`Plan migrated: ${String(result?.migrated ?? true)}`);
+
+    const validated = await planValidate(projectRoot.value, planPath.value);
+    const selected = selectedDiscoveredPlan.value;
+    if (selected) {
+      selected.valid = validated.valid;
+      selected.issues = validated.issues;
+    }
+  } catch (error) {
+    pushLog(`Plan migrate failed: ${String(error)}`);
+  } finally {
+    migratingPlan.value = false;
+  }
+}
 
 const validationSummary = computed(() => {
   if (!planPath.value) return "No plan selected";

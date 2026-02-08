@@ -17,6 +17,7 @@ import {
   packsListInstalled,
   phaseGatesGet,
   phaseGatesPut,
+  planMigrate,
   planValidate,
   plansList,
   plansStatus,
@@ -55,6 +56,31 @@ describe("useControlPlane", () => {
     expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json" }));
     expect(init?.headers).toBeInstanceOf(Headers);
     expect((init!.headers as Headers).get("content-type")).toBe("application/json");
+  });
+
+  it("calls plan_migrate", async () => {
+    // Given the backend returns a migration result
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        migrated: true,
+        wrote: true,
+        filePath: "/tmp/plan.json",
+        fromSpecVersion: "v1",
+        toSpecVersion: "v2"
+      })
+    });
+
+    // When plan migration is requested
+    const result = await planMigrate("/tmp/project", "/tmp/plan.json", true);
+
+    // Then the API is called with expected args and the result is returned
+    expect(result.migrated).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/plan/migrate");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json", write: true }));
   });
 
   it("builds workflow_auto_stream URL with expected query params", async () => {

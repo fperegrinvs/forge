@@ -55,13 +55,13 @@ Forge Desktop can download non-executable "packs" (starting with `forge-guidance
 Notes:
 
 - Switching pack names is supported. If you switch packs, consider enabling **Force replace local changes** to avoid a mixed configuration.
-- Installing into a project runs `forge install-guidance` via the Desktop backend.
+- Installing into a project runs the internal Forge sidecar via the Desktop backend.
 
 Configuration (optional):
 
 - `FORGE_DESKTOP_PACKS_REPO`: GitHub repo in `owner/repo` form that hosts release assets (default: `forge/forge`).
-- `FORGE_DESKTOP_FORGE_BIN`: Path to a `forge` executable to run from the desktop backend.
-- `FORGE_DESKTOP_FORGE_ENTRY_JS`: Path to `packages/cli/dist/bin.js` (desktop will run `node <entry>`).
+- `FORGE_DESKTOP_SIDECAR_BIN`: Path to a sidecar executable to run from the desktop backend.
+- `FORGE_DESKTOP_SIDECAR_ENTRY_JS`: Path to `packages/sidecar/dist/entry.js` (desktop will run `node <entry>`).
 
 Expected release assets:
 

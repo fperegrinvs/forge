@@ -13,7 +13,7 @@
     "hooks:install": "./scripts/install-githooks.sh",
     "workflow:sync": "bun scripts/sync-workflow-assets.mjs",
     "workflow:check-sync": "bun scripts/check-workflow-sync.mjs",
-    "workflow:check": "bun run --filter @forge/cli build && bun packages/cli/dist/bin.js workflow check --plan plans/forge-monorepo-v1.plan.json",
+    "workflow:check": "bun run --filter @forge/control-plane build && node scripts/workflow-check.mjs --plan plans/forge-monorepo-v1.plan.json",
     "build": "bun run --workspaces build --if-present",
     "typecheck": "tsc -b",
     "lint": "eslint .",

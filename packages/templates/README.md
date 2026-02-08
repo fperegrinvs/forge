@@ -1,6 +1,6 @@
 # @forge/templates
 
-Project and module scaffolding used by `forge init` and `forge scaffold module`.
+Project and module scaffolding used by Forge Desktop (via the internal sidecar).
 
 ## Commands
 
@@ -11,4 +11,3 @@ bun run --filter @forge/templates build
 bun run --filter @forge/templates test
 bun run --filter @forge/templates typecheck
 ```
-

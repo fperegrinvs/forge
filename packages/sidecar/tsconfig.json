@@ -4,14 +4,16 @@
     "outDir": "dist",
     "rootDir": "src"
   },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [
+    { "path": "../shared-utils" },
     { "path": "../contracts" },
+    { "path": "../templates" },
+    { "path": "../guidance-pack" },
     { "path": "../check-runner" },
     { "path": "../adapter-codex" },
     { "path": "../adapter-claude" },
-    { "path": "../guidance-pack" },
-    { "path": "../shared-utils" }
-  ],
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts"]
+    { "path": "../control-plane" }
+  ]
 }

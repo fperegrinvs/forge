@@ -10,13 +10,13 @@ This repository implements Phase 0-2 of Forge componentization.
 - `packages/check-runner`: Task-type check execution and normalization.
 - `packages/adapter-codex` and `packages/adapter-claude`: Runtime adapters with unified event contract.
 - `packages/control-plane`: Plan lifecycle orchestration and evidence persistence.
-- `packages/cli`: Public command surface (`forge ...`) wrapping package services.
+- `packages/sidecar`: Internal Desktop sidecar process (JSON over stdin/stdout) that wraps package services.
 - `apps/desktop`: Tauri + Vue UI with an embedded single-port HTTP server that serves both the Vite-built frontend and `/api/*` backend routes on one origin.
 
 ## Data Flow
 
-1. `forge plan validate` calls contracts schema + graph validation.
-2. `forge run next` calls control-plane.
+1. Desktop calls `/api/plan/validate`, which spawns the sidecar and runs contracts validation.
+2. Desktop calls `/api/workflow/auto/stream`, which spawns the sidecar to run control-plane orchestration + adapters + gates.
 3. Control-plane selects runnable task from dependency DAG.
 4. Control-plane delegates to selected adapter.
 5. Control-plane runs checks via check-runner based on `task_type`.
@@ -34,7 +34,7 @@ Per task run, control-plane writes:
 
 ## Constraints
 
-- Monorepo-first, local template source for `forge init`.
+- Monorepo-first, local template source for project initialization.
 - Task execution is single-lane in v1.
 - Runtime integration is adapter-based to keep core runtime-agnostic.
 
@@ -50,6 +50,6 @@ The current repository implements only Phases 0-2 from `docs/components-deep-div
 
 ### Phase 4: Forge Control Plane Distribution (Not Implemented Yet)
 
-- Unified distribution/packaging for CLI + guidance + desktop.
+- Unified distribution/packaging for sidecar + guidance + desktop.
 - Upgrade and compatibility policy.
 - Standardized evidence export/import format for external consumers.

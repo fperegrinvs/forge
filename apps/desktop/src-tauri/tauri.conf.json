@@ -23,7 +23,8 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../../../packages/guidance-pack/src/assets/pack": "bundled-packs/pack"
+      "../../../packages/guidance-pack/src/assets/pack": "bundled-packs/pack",
+      "../../../packages/sidecar/dist/entry.js": "sidecar/entry.js"
     }
   }
 }
