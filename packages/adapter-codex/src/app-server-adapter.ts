@@ -19,6 +19,8 @@ type JsonRpcRequest = { id: number | string; method: string; params?: unknown };
 type JsonRpcResponse = { id: number | string; result?: unknown; error?: unknown };
 type JsonRpcNotification = { method: string; params?: unknown };
 
+type UserInputAnswers = Record<string, { answers: string[] }>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -53,6 +55,49 @@ class AsyncQueue<T> {
     if (next !== undefined) return next;
     return await new Promise<T>((resolve) => this.waiters.push(resolve));
   }
+}
+
+class StdinJsonRouter {
+  private readonly pending = new Map<string, (payload: unknown) => void>();
+  private readonly rl = createInterface({ input: process.stdin });
+
+  constructor() {
+    this.rl.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed) as unknown;
+      } catch {
+        return;
+      }
+      if (!isRecord(parsed) || parsed.type !== "user_input.response") return;
+      const requestId = typeof parsed.requestId === "string" ? parsed.requestId : typeof parsed.requestId === "number" ? String(parsed.requestId) : "";
+      if (!requestId) return;
+      const resolver = this.pending.get(requestId);
+      if (!resolver) return;
+      this.pending.delete(requestId);
+      resolver(parsed);
+    });
+  }
+
+  waitForResponse(requestId: string): Promise<UserInputAnswers> {
+    return new Promise((resolve) => {
+      this.pending.set(requestId, (payload: unknown) => {
+        if (isRecord(payload) && isRecord(payload.answers)) {
+          resolve(payload.answers as UserInputAnswers);
+          return;
+        }
+        resolve({});
+      });
+    });
+  }
+}
+
+let globalStdinRouter: StdinJsonRouter | null = null;
+function stdinRouter(): StdinJsonRouter {
+  if (!globalStdinRouter) globalStdinRouter = new StdinJsonRouter();
+  return globalStdinRouter;
 }
 
 class CodexAppServerClient {
@@ -226,7 +271,23 @@ export class CodexAppServerAdapter implements AgentAdapter {
 
       // Auto-respond to server-initiated requests (approvals / user input).
       if (isJsonRpcRequest(msg)) {
-        await this.handleServerRequest(msg);
+        if (msg.method === "item/tool/requestUserInput") {
+          const requestId = String(msg.id);
+          const extracted = extractUserInputQuestions(msg.params);
+          yield {
+            type: "run.user_input.requested",
+            runId,
+            requestId,
+            questions: extracted,
+            at: new Date().toISOString()
+          } as const;
+
+          const answers = await this.resolveUserInputAnswers(msg.params, requestId);
+          this.client.respond(msg.id, { answers });
+          continue;
+        }
+
+        this.handleServerRequest(msg);
         continue;
       }
 
@@ -285,9 +346,8 @@ export class CodexAppServerAdapter implements AgentAdapter {
     return threadId;
   }
 
-  private async handleServerRequest(req: JsonRpcRequest): Promise<void> {
+  private handleServerRequest(req: JsonRpcRequest): void {
     const method = req.method;
-    const params = req.params;
 
     if (method === "item/commandExecution/requestApproval") {
       this.client.respond(req.id, { decision: "acceptForSession" });
@@ -297,32 +357,37 @@ export class CodexAppServerAdapter implements AgentAdapter {
       this.client.respond(req.id, { decision: "acceptForSession" });
       return;
     }
-    if (method === "item/tool/requestUserInput") {
-      const answers = await this.buildUserInputAnswers(params);
-      this.client.respond(req.id, { answers });
-      return;
-    }
 
     // Unknown request: decline by default.
     this.client.respond(req.id, {});
   }
 
-  private async buildUserInputAnswers(params: unknown): Promise<Record<string, { answers: string[] }>> {
-    // Non-interactive: choose the first option (best-effort) so the workflow can continue.
-    if (!process.stdin.isTTY) {
-      const answers: Record<string, { answers: string[] }> = {};
-      if (isRecord(params) && Array.isArray(params.questions)) {
-        for (const q of params.questions) {
-          if (!isRecord(q) || typeof q.id !== "string") continue;
-          const opts = Array.isArray(q.options) ? q.options : null;
-          const first = opts && isRecord(opts[0]) && typeof opts[0].label === "string" ? opts[0].label : "";
-          answers[q.id] = { answers: first ? [first] : [] };
-        }
-      }
-      return answers;
+  private async resolveUserInputAnswers(params: unknown, requestId: string): Promise<UserInputAnswers> {
+    if (process.stdin.isTTY) {
+      return await this.promptUserInputAnswers(params);
     }
 
+    // Desktop/automation: allow an external UI to answer via stdin JSON.
+    if (process.env.FORGE_INTERACTIVE === "1") {
+      return await stdinRouter().waitForResponse(requestId);
+    }
+
+    // Non-interactive: choose the first option (best-effort) so the workflow can continue.
     const answers: Record<string, { answers: string[] }> = {};
+    if (isRecord(params) && Array.isArray(params.questions)) {
+      for (const q of params.questions) {
+        if (!isRecord(q) || typeof q.id !== "string") continue;
+        const opts = Array.isArray(q.options) ? q.options : null;
+        const first = opts && isRecord(opts[0]) && typeof opts[0].label === "string" ? opts[0].label : "";
+        answers[q.id] = { answers: first ? [first] : [] };
+      }
+    }
+    return answers;
+  }
+
+  private async promptUserInputAnswers(params: unknown): Promise<UserInputAnswers> {
+    const answers: Record<string, { answers: string[] }> = {};
+
     const rl = createPromptInterface({ input: process.stdin, output: process.stderr });
     try {
       const qs = isRecord(params) && Array.isArray(params.questions) ? params.questions : [];
@@ -339,8 +404,14 @@ export class CodexAppServerAdapter implements AgentAdapter {
 
         const opts = Array.isArray(q.options) ? q.options : [];
         const labels: string[] = [];
+        const isOtherLabels = new Set<string>();
         for (const opt of opts) {
-          if (isRecord(opt) && typeof opt.label === "string") labels.push(opt.label);
+          if (isRecord(opt) && typeof opt.label === "string") {
+            labels.push(opt.label);
+            if (opt.isOther === true) {
+              isOtherLabels.add(opt.label);
+            }
+          }
         }
 
         let selected = "";
@@ -357,6 +428,14 @@ export class CodexAppServerAdapter implements AgentAdapter {
           } else {
             selected = labels[0] ?? "";
           }
+
+          // If the user chose an isOther option, allow free-form input.
+          if (selected && isOtherLabels.has(selected)) {
+            const free = (await rl.question("Other: ")).trim();
+            if (free) {
+              selected = free;
+            }
+          }
         } else {
           selected = (await rl.question("> ")).trim();
         }
@@ -368,6 +447,40 @@ export class CodexAppServerAdapter implements AgentAdapter {
     }
     return answers;
   }
+}
+
+function extractUserInputQuestions(params: unknown): Array<{
+  id: string;
+  header?: string;
+  question: string;
+  options: Array<{ label: string; description?: string; isOther?: boolean }>;
+}> {
+  const out: Array<{
+    id: string;
+    header?: string;
+    question: string;
+    options: Array<{ label: string; description?: string; isOther?: boolean }>;
+  }> = [];
+
+  if (!isRecord(params) || !Array.isArray(params.questions)) return out;
+  for (const q of params.questions) {
+    if (!isRecord(q) || typeof q.id !== "string") continue;
+    const question = typeof q.question === "string" ? q.question : typeof q.prompt === "string" ? q.prompt : "";
+    const header = typeof q.header === "string" ? q.header : undefined;
+    const optsRaw = Array.isArray(q.options) ? q.options : [];
+    const options: Array<{ label: string; description?: string; isOther?: boolean }> = [];
+    for (const opt of optsRaw) {
+      if (!isRecord(opt) || typeof opt.label !== "string") continue;
+      options.push({
+        label: opt.label,
+        ...(typeof opt.description === "string" ? { description: opt.description } : {}),
+        ...(opt.isOther === true ? { isOther: true } : {})
+      });
+    }
+
+    out.push({ id: q.id, question, ...(header ? { header } : {}), options });
+  }
+  return out;
 }
 
 function extractThreadId(result: unknown): string | undefined {
