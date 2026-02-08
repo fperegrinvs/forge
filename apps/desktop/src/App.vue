@@ -28,6 +28,14 @@
                       <v-btn size="small" variant="text" @click.stop="onBrowseProjectRoot">Browse</v-btn>
                     </template>
                   </v-text-field>
+
+                  <v-alert v-if="!guidanceStatus?.installed" type="info" variant="tonal" class="mb-3">
+                    <div class="d-flex flex-wrap align-center ga-2">
+                      <span>No pack is installed in this project yet. Install one from the Packs tab to enable rules and skills.</span>
+                      <v-btn size="small" variant="text" @click="tab = 'packs'">Open Packs</v-btn>
+                    </div>
+                  </v-alert>
+
                   <v-text-field v-model="planPath" label="Plan path (relative to project root)" density="comfortable" />
 
                   <div v-if="discoveredPlans.length" class="mb-3">
