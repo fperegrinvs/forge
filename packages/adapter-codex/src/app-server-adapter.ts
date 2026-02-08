@@ -59,26 +59,50 @@ class AsyncQueue<T> {
 
 class StdinJsonRouter {
   private readonly pending = new Map<string, (payload: unknown) => void>();
-  private readonly rl = createInterface({ input: process.stdin });
+  private buffer = "";
 
   constructor() {
-    this.rl.on("line", (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(trimmed) as unknown;
-      } catch {
-        return;
+    // Avoid `readline.createInterface({ input: process.stdin })` here.
+    // The CLI may already be using readline on stdin (e.g. `forge codex session`),
+    // and multiple readline interfaces competing over the same stream can drop lines.
+    process.stdin.on("data", (chunk) => {
+      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+      this.buffer += text;
+
+      for (;;) {
+        const idx = this.buffer.indexOf("\n");
+        if (idx === -1) break;
+        const line = this.buffer.slice(0, idx);
+        this.buffer = this.buffer.slice(idx + 1);
+        this.onLine(line);
       }
-      if (!isRecord(parsed) || parsed.type !== "user_input.response") return;
-      const requestId = typeof parsed.requestId === "string" ? parsed.requestId : typeof parsed.requestId === "number" ? String(parsed.requestId) : "";
-      if (!requestId) return;
-      const resolver = this.pending.get(requestId);
-      if (!resolver) return;
-      this.pending.delete(requestId);
-      resolver(parsed);
     });
+
+    // Ensure the stream is flowing when no other consumer is attached (non-TTY automation).
+    try {
+      process.stdin.resume();
+    } catch {
+      // ignore
+    }
+  }
+
+  private onLine(line: string): void {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed) as unknown;
+    } catch {
+      return;
+    }
+    if (!isRecord(parsed) || parsed.type !== "user_input.response") return;
+    const requestId =
+      typeof parsed.requestId === "string" ? parsed.requestId : typeof parsed.requestId === "number" ? String(parsed.requestId) : "";
+    if (!requestId) return;
+    const resolver = this.pending.get(requestId);
+    if (!resolver) return;
+    this.pending.delete(requestId);
+    resolver(parsed);
   }
 
   waitForResponse(requestId: string): Promise<UserInputAnswers> {

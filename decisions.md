@@ -22,6 +22,7 @@ Track repository-level technical decisions and rationale.
 - Workflow auto uses `codex app-server` (JSON-RPC-over-JSONL) for Codex runs and an interactive Claude Code session wrapped via `/usr/bin/script` + hooks for lifecycle signaling.
 - `forge workflow auto` now prints a best-effort progress snapshot (per task + per phase markers) to stderr after each successful phase to keep terminal sessions readable while the agent streams output.
 - Codex app-server `tool/requestUserInput` is handled interactively when `stdin` is a TTY (prompt user to pick an option); in non-interactive mode it auto-selects the first option (best-effort) so automation does not hang.
+- Codex non-interactive prompt responses are routed via a `stdin` JSON protocol (listening on `data` events rather than a competing readline interface) so Desktop streams can handle both user messages and prompt responses reliably.
 - Claude hook bridge runner is now import-safe (only executes when run as a script), enabling unit tests while preserving hook CLI behavior; Claude PTY adapter gained small dependency injection points for faking spawn/interfaces in tests.
 - Claude hook callback HTTP server calls `unref()` after listening so it won’t keep the process alive on its own (important for tests and short-lived CLI runs).
 - Updated the spec gate wrapper script to succeed only when tests are RED (typecheck passes and test suite fails), aligning with the code-first BDD discipline.
