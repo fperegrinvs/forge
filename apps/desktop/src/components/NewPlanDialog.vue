@@ -70,6 +70,9 @@
           />
 
           <div class="flex-grow-1" style="min-width: 0; min-height: 0;">
+            <v-alert v-if="error" type="error" variant="tonal" class="mb-2">
+              {{ error }}
+            </v-alert>
             <TerminalPanel
               v-if="sessionId"
               :session-id="sessionId"
@@ -101,6 +104,7 @@ import { computed, ref, watch } from "vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
 import { getSkillInvocation } from "./planDialogInstructions";
+import { buildNewPlanSpawnConfig } from "./newPlanSpawnConfig";
 
 interface DiscoveredPlan {
   filename: string;
@@ -147,10 +151,8 @@ watch(open, async (value) => {
     error.value = "";
     sessionId.value = "";
     try {
-      const result = await terminalSpawn({
-        command: props.adapter,
-        cwd: props.projectRoot
-      });
+      const spawnConfig = buildNewPlanSpawnConfig(props.adapter, props.projectRoot);
+      const result = await terminalSpawn(spawnConfig);
       sessionId.value = result.sessionId;
     } catch (e) {
       error.value = `Failed to start terminal: ${String(e)}`;

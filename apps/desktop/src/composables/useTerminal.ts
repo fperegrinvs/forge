@@ -21,6 +21,7 @@ export type SpawnConfig = {
   command: string;
   args?: string[];
   cwd?: string;
+  env?: Record<string, string>;
   cols?: number;
   rows?: number;
 };
