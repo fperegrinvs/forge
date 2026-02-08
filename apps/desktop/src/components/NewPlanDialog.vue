@@ -108,17 +108,7 @@ import TerminalPanel from "./TerminalPanel.vue";
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
 import { getSkillInvocation } from "./planDialogInstructions";
 import { buildNewPlanSpawnConfig } from "./newPlanSpawnConfig";
-import { computeChangedPlans } from "../lib/plans.js";
-
-interface DiscoveredPlan {
-  filename: string;
-  path: string;
-  modifiedMs: number;
-  valid: boolean | null;
-  validating: boolean;
-  taskStatuses: unknown[];
-  issues: Array<{ path: string; message: string; code: string }>;
-}
+import { computeChangedPlans, type DiscoveredPlan } from "../lib/plans.js";
 
 const props = defineProps<{
   projectRoot: string;
