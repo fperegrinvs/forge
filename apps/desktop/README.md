@@ -29,6 +29,27 @@ Notes:
 
 Forge Desktop can download non-executable "packs" (starting with `forge-guidance-pack`) from GitHub Releases and install them into a selected project directory.
 
+### Concepts
+
+- **Downloaded pack**: A pack directory stored in the Desktop app data dir (fetched from GitHub Releases or bundled with the app). Desktop lists these under "Installed Packs".
+- **Project-installed pack**: Guidance files copied into a specific project root (e.g. `manifest.json`, `AGENTS.md`, `rules/`, `skills/`). Desktop shows this under "Project Pack".
+- **Project pack source metadata**: After installing into a project, Forge writes `.forge/guidance.json` recording which downloaded pack path was used (name/version/path + timestamp + whether forceReplace was used).
+
+### Typical Workflow (Desktop UI)
+
+1. Select a **Project root**.
+2. Go to the **Packs** tab and confirm the **Installed** project pack status.
+3. Choose a **Pack** name.
+4. Click **Check Updates** (populates latest versions from the remote index).
+5. Click **Download Latest** (downloads the pack into the Desktop app data dir).
+6. Choose a **Downloaded version** (or keep the default).
+7. Click **Install/Update In Project**.
+
+Notes:
+
+- Switching pack names is supported. If you switch packs, consider enabling **Force replace local changes** to avoid a mixed configuration.
+- Installing into a project runs `forge install-guidance` via the Desktop backend.
+
 Configuration (optional):
 
 - `FORGE_DESKTOP_PACKS_REPO`: GitHub repo in `owner/repo` form that hosts release assets (default: `forge/forge`).

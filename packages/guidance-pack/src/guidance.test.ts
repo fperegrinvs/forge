@@ -11,6 +11,7 @@ import {
   getBundledGuidanceRoot,
   installGuidance,
   installGuidanceFromPackRoot,
+  registerCodexSkills,
   loadBundledManifest,
   loadBundledWorkflowPolicy,
   registerSkillCommands,
@@ -197,6 +198,24 @@ describe("guidance pack", () => {
     expect(result.codex).toContain("my-skill");
     const codexSkill = await readFile(join(targetRoot, ".agents", "skills", "my-skill", "SKILL.md"), "utf8");
     expect(codexSkill).toBe(originalContent);
+  });
+
+  it("registerCodexSkills writes only .agents/skills and does not create .claude/commands", async () => {
+    const skillsDir = await mkdtemp(join(tmpdir(), "forge-skills-codex-only-"));
+    const skillDir = join(skillsDir, "my-skill");
+    await mkdir(skillDir, { recursive: true });
+    const originalContent = "---\nname: my-skill\n---\n\n# my-skill\n\nFull content.\n";
+    await writeFile(join(skillDir, "SKILL.md"), originalContent, "utf8");
+
+    const targetRoot = await mkdtemp(join(tmpdir(), "forge-target-codex-only-"));
+
+    const result = await registerCodexSkills(skillsDir, targetRoot);
+    expect(result.updated).toContain("my-skill");
+
+    const codexSkill = await readFile(join(targetRoot, ".agents", "skills", "my-skill", "SKILL.md"), "utf8");
+    expect(codexSkill).toBe(originalContent);
+
+    expect(await exists(join(targetRoot, ".claude", "commands", "my-skill.md"))).toBe(false);
   });
 
   it("installGuidance populates both .claude/commands/ and .agents/skills/", async () => {

@@ -140,7 +140,7 @@
             <v-row>
               <v-col cols="12" md="7">
                 <v-card class="pa-4 mb-4">
-                  <h2 class="text-h6 mb-3">Guidance Pack</h2>
+                  <h2 class="text-h6 mb-3">Project Pack</h2>
                   <v-text-field v-model="projectRoot" label="Project root" density="comfortable" readonly @click="onBrowseProjectRoot">
                     <template #append>
                       <v-btn size="small" variant="text" @click.stop="onBrowseProjectRoot">Browse</v-btn>
@@ -151,6 +151,14 @@
                     <v-btn color="primary" variant="outlined" @click="onRefreshGuidance">Refresh Status</v-btn>
                     <v-btn color="primary" variant="outlined" @click="onCheckUpdates">Check Updates</v-btn>
                   </div>
+
+                  <v-alert v-if="!guidanceStatus?.installed" type="info" variant="tonal" class="mb-3">
+                    No pack is installed in this project yet. Select a pack below and install it to enable rules and skills.
+                  </v-alert>
+
+                  <v-alert v-if="switchingPackName" type="warning" variant="tonal" class="mb-3">
+                    Switching packs may leave mixed configuration unless you use Force replace.
+                  </v-alert>
 
                   <v-alert v-if="guidanceError" type="error" variant="tonal" class="mb-3">
                     {{ guidanceError }}
@@ -163,19 +171,50 @@
                     </span>
                     <span v-else>no</span>
                   </p>
-                  <p class="mb-3">
-                    <strong>Latest:</strong>
-                    <span>{{ latestGuidanceVersion || "-" }}</span>
+
+                  <p v-if="installedProjectPackSource" class="mb-1 text-body-2">
+                    <strong>Source:</strong>
+                    {{ installedProjectPackSource.pack.path }} ({{ installedProjectPackSource.pack.name }} @ {{ installedProjectPackSource.pack.version }})
                   </p>
 
+                  <p class="mb-3">
+                    <strong>Latest (remote):</strong>
+                    <span>{{ selectedPackLatestVersion || "-" }}</span>
+                  </p>
+
+                  <v-select
+                    v-model="selectedPackName"
+                    :items="availablePackNames"
+                    label="Pack"
+                    density="comfortable"
+                    class="mb-2"
+                  />
+
+                  <v-select
+                    v-model="selectedPackPath"
+                    :items="downloadedVersionsForSelected"
+                    item-title="version"
+                    item-value="path"
+                    label="Downloaded version"
+                    density="comfortable"
+                    :disabled="!downloadedVersionsForSelected.length"
+                  >
+                    <template #selection="{ item }">
+                      <span>{{ item?.title }}</span>
+                    </template>
+                    <template #item="{ props, item }">
+                      <v-list-item v-bind="props" :title="item?.title" :subtitle="String(item?.raw?.path ?? '')" />
+                    </template>
+                  </v-select>
+
                   <div class="d-flex flex-wrap ga-2 align-center">
-                    <v-btn color="primary" :disabled="!latestGuidanceVersion" @click="onDownloadLatestGuidance">
+                    <v-btn color="primary" :disabled="!selectedPackLatestVersion" @click="onDownloadLatestGuidance">
                       Download Latest
                     </v-btn>
                     <v-btn
                       color="primary"
                       variant="outlined"
-                      :disabled="!downloadedGuidancePackPath"
+                      :disabled="!selectedPackPath"
                       @click="onInstallGuidance"
                     >
                       Install/Update In Project
@@ -183,8 +222,10 @@
                     <v-checkbox v-model="forceReplace" label="Force replace local changes" density="compact" hide-details />
                   </div>
 
-                  <p v-if="downloadedGuidancePackPath" class="mt-3 text-body-2">
-                    <strong>Downloaded pack:</strong> {{ downloadedGuidancePackPath }}
+                  <p v-if="selectedDownloadedPack" class="mt-3 text-body-2">
+                    <strong>Selected:</strong> {{ selectedDownloadedPack.name }} @ {{ selectedDownloadedPack.version }}
+                    <br />
+                    <strong>Path:</strong> {{ selectedDownloadedPack.path }}
                   </p>
                 </v-card>
               </v-col>
@@ -201,6 +242,7 @@
                       :key="index"
                       :title="`${p.name} @ ${p.version}`"
                       :subtitle="p.path"
+                      @click="onSelectInstalledPack(p)"
                     />
                   </v-list>
                 </v-card>
@@ -241,6 +283,7 @@ import {
   runNextStreamUrl,
   selectFolder,
   type InstalledPack,
+  type PackUpdateStatus,
   type PlanFileEntry,
   type ProjectGuidanceStatus,
   type RunNextResult,
@@ -265,11 +308,99 @@ const LAST_PROJECT_ROOT_KEY = "forge.desktop.lastProjectRoot";
 
 const guidanceStatus = ref<ProjectGuidanceStatus>();
 const guidanceError = ref<string>("");
-const latestGuidanceVersion = ref<string>("");
-const downloadedGuidancePackPath = ref<string>("");
+const packUpdates = ref<PackUpdateStatus[]>([]);
+const selectedPackName = ref<string>("forge-guidance-pack");
+const selectedPackPath = ref<string>("");
 const forceReplace = ref(false);
 const installedPacks = ref<InstalledPack[]>([]);
 const packLogs = ref<string[]>([]);
+
+function parseSemver(value: string): [number, number, number] | null {
+  const core = value.split("-")[0]?.split("+")[0] ?? "";
+  const parts = core.split(".");
+  if (parts.length < 3) return null;
+  const major = Number(parts[0]);
+  const minor = Number(parts[1]);
+  const patch = Number(parts[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) return null;
+  return [major, minor, patch];
+}
+
+function compareVersionDesc(a: string, b: string): number {
+  const av = parseSemver(a);
+  const bv = parseSemver(b);
+  if (av && bv) {
+    if (av[0] !== bv[0]) return bv[0] - av[0];
+    if (av[1] !== bv[1]) return bv[1] - av[1];
+    if (av[2] !== bv[2]) return bv[2] - av[2];
+    return 0;
+  }
+  return b.localeCompare(a);
+}
+
+const availablePackNames = computed(() => {
+  const names = new Set<string>();
+  for (const p of installedPacks.value) names.add(p.name);
+  for (const u of packUpdates.value) names.add(u.name);
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
+});
+
+const downloadedVersionsForSelected = computed(() => {
+  return installedPacks.value
+    .filter((p) => p.name === selectedPackName.value)
+    .slice()
+    .sort((a, b) => compareVersionDesc(a.version, b.version));
+});
+
+const selectedDownloadedPack = computed(() => {
+  return downloadedVersionsForSelected.value.find((p) => p.path === selectedPackPath.value);
+});
+
+const selectedPackLatestVersion = computed(() => {
+  const match = packUpdates.value.find((u) => u.name === selectedPackName.value);
+  return match?.latestVersion || "";
+});
+
+const installedProjectPackName = computed(() => guidanceStatus.value?.manifest?.name || "");
+const installedProjectPackVersion = computed(() => guidanceStatus.value?.manifest?.version || "");
+const installedProjectPackSource = computed(() => guidanceStatus.value?.source);
+
+const switchingPackName = computed(() => {
+  const installedName = installedProjectPackName.value;
+  return Boolean(installedName && selectedPackName.value && selectedPackName.value !== installedName);
+});
+
+function syncPackSelection(): void {
+  const installedName = installedProjectPackName.value;
+  const currentNameValid = selectedPackName.value && availablePackNames.value.includes(selectedPackName.value);
+  if (!currentNameValid) {
+    if (installedName && availablePackNames.value.includes(installedName)) {
+      selectedPackName.value = installedName;
+    } else if (availablePackNames.value.includes("forge-guidance-pack")) {
+      selectedPackName.value = "forge-guidance-pack";
+    } else if (availablePackNames.value.length > 0) {
+      selectedPackName.value = availablePackNames.value[0]!;
+    }
+  }
+
+  const versions = downloadedVersionsForSelected.value;
+  if (versions.length === 0) {
+    selectedPackPath.value = "";
+    return;
+  }
+
+  const currentPathValid = selectedPackPath.value && versions.some((v) => v.path === selectedPackPath.value);
+  if (currentPathValid) {
+    return;
+  }
+
+  const installedVersion = installedProjectPackVersion.value;
+  const matchingInstalled = installedVersion
+    ? versions.find((v) => v.version === installedVersion)
+    : undefined;
+
+  selectedPackPath.value = (matchingInstalled ?? versions[0]!).path;
+}
 
 const current = reactive<RunNextResult>({
   state: "idle",
@@ -346,11 +477,8 @@ const validationSummary = computed(() => {
 onMounted(async () => {
   try {
     installedPacks.value = await packsListInstalled();
-    const guidance = installedPacks.value.find((p) => p.name === "forge-guidance-pack");
-    if (guidance) {
-      downloadedGuidancePackPath.value = guidance.path;
-    }
     packLogs.value.unshift(`Loaded ${installedPacks.value.length} pack(s) on startup`);
+    syncPackSelection();
   } catch (error) {
     packLogs.value.unshift(`Startup pack load error: ${String(error)}`);
   }
@@ -420,6 +548,20 @@ watch(tab, (newTab) => {
     startPolling();
   } else {
     stopPolling();
+  }
+});
+
+watch(projectRoot, () => {
+  // When switching projects, refresh pack + guidance context automatically.
+  onRefreshGuidance();
+  onListInstalledPacks();
+});
+
+watch(selectedPackName, () => {
+  // Keep selectedPackPath aligned to the selected pack name.
+  const versions = downloadedVersionsForSelected.value;
+  if (!versions.some((v) => v.path === selectedPackPath.value)) {
+    selectedPackPath.value = versions[0]?.path ?? "";
   }
 });
 
@@ -715,6 +857,7 @@ async function onRefreshGuidance(): Promise<void> {
   try {
     guidanceStatus.value = await projectGetGuidanceStatus(projectRoot.value);
     packLogs.value.unshift("Guidance status refreshed");
+    syncPackSelection();
   } catch (error) {
     guidanceError.value = String(error);
     packLogs.value.unshift(`Guidance status error: ${String(error)}`);
@@ -725,18 +868,19 @@ async function onListInstalledPacks(): Promise<void> {
   try {
     installedPacks.value = await packsListInstalled();
     packLogs.value.unshift(`Installed packs refreshed (${installedPacks.value.length})`);
+    syncPackSelection();
   } catch (error) {
     packLogs.value.unshift(`Installed packs error: ${String(error)}`);
   }
 }
 
 async function onCheckUpdates(): Promise<void> {
-  latestGuidanceVersion.value = "";
+  packUpdates.value = [];
   try {
     const statuses = await packsCheckUpdates();
-    const guidance = statuses.find((s) => s.name === "forge-guidance-pack");
-    latestGuidanceVersion.value = guidance?.latestVersion ?? "";
+    packUpdates.value = statuses;
     packLogs.value.unshift("Update check complete");
+    syncPackSelection();
   } catch (error) {
     packLogs.value.unshift(`Update check error: ${String(error)}`);
     guidanceError.value = String(error);
@@ -746,10 +890,11 @@ async function onCheckUpdates(): Promise<void> {
 async function onDownloadLatestGuidance(): Promise<void> {
   guidanceError.value = "";
   try {
-    const installed = await packsDownload("forge-guidance-pack", latestGuidanceVersion.value || undefined);
-    downloadedGuidancePackPath.value = installed.path;
+    const installed = await packsDownload(selectedPackName.value, selectedPackLatestVersion.value || undefined);
     packLogs.value.unshift(`Downloaded ${installed.name} @ ${installed.version}`);
     await onListInstalledPacks();
+    selectedPackName.value = installed.name;
+    selectedPackPath.value = installed.path;
   } catch (error) {
     guidanceError.value = String(error);
     packLogs.value.unshift(`Download error: ${String(error)}`);
@@ -757,19 +902,24 @@ async function onDownloadLatestGuidance(): Promise<void> {
 }
 
 async function onInstallGuidance(): Promise<void> {
-  if (!downloadedGuidancePackPath.value) {
+  if (!selectedPackPath.value) {
     packLogs.value.unshift("Install guidance -> no downloaded pack");
     return;
   }
 
   guidanceError.value = "";
   try {
-    await projectInstallGuidance(projectRoot.value, downloadedGuidancePackPath.value, forceReplace.value);
+    await projectInstallGuidance(projectRoot.value, selectedPackPath.value, forceReplace.value);
     packLogs.value.unshift("Guidance installed into project");
     await onRefreshGuidance();
   } catch (error) {
     guidanceError.value = String(error);
     packLogs.value.unshift(`Install guidance error: ${String(error)}`);
   }
+}
+
+function onSelectInstalledPack(pack: InstalledPack): void {
+  selectedPackName.value = pack.name;
+  selectedPackPath.value = pack.path;
 }
 </script>
