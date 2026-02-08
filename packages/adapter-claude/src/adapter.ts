@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { AdapterEvent, AgentAdapter, RunContext, RunHandle } from "@forge/shared-utils";
+import { renderClaudeStreamJsonLine } from "./render.js";
 
 type CommandExecutor = (
   command: string,
@@ -48,11 +49,22 @@ export class ClaudeAdapter implements AgentAdapter {
         .filter(Boolean);
 
       for (const line of lines) {
+        const rendered = renderClaudeStreamJsonLine(line);
+        if (rendered.tool) {
+          yield {
+            type: "run.tool",
+            runId,
+            tool: rendered.tool.name,
+            status: rendered.tool.status,
+            at: new Date().toISOString()
+          };
+        }
         yield {
           type: "run.output",
           runId,
           stream: "stdout",
-          chunk: line,
+          chunk: rendered.chunk,
+          ...(rendered.raw ? { raw: rendered.raw } : {}),
           at: new Date().toISOString()
         };
       }
@@ -144,6 +156,28 @@ export class ClaudeAdapter implements AgentAdapter {
       if (!next) continue;
       const line = next.line.trim();
       if (!line) continue;
+
+      if (next.stream === "stdout") {
+        const rendered = renderClaudeStreamJsonLine(line);
+        if (rendered.tool) {
+          yield {
+            type: "run.tool",
+            runId,
+            tool: rendered.tool.name,
+            status: rendered.tool.status,
+            at: new Date().toISOString()
+          };
+        }
+        yield {
+          type: "run.output",
+          runId,
+          stream: "stdout",
+          chunk: rendered.chunk,
+          ...(rendered.raw ? { raw: rendered.raw } : {}),
+          at: new Date().toISOString()
+        };
+        continue;
+      }
 
       yield {
         type: "run.output",

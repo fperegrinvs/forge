@@ -68,13 +68,6 @@ export async function planValidate(projectRoot: string, planPath: string): Promi
   });
 }
 
-export async function runNext(projectRoot: string, planPath: string, adapter: "codex" | "claude"): Promise<RunNextResult> {
-  return await apiJson<RunNextResult>("/api/run/next", {
-    method: "POST",
-    body: JSON.stringify({ projectRoot, planPath, adapter })
-  });
-}
-
 export function runNextStreamUrl(projectRoot: string, planPath: string, adapter: "codex" | "claude"): string {
   const url = new URL("/api/run/next/stream", window.location.origin);
   url.searchParams.set("projectRoot", projectRoot);
@@ -191,10 +184,4 @@ export async function plansStatus(projectRoot: string, planPath: string): Promis
   url.searchParams.set("projectRoot", projectRoot);
   url.searchParams.set("planPath", planPath);
   return await apiJson<PlanStatusResult>(url.toString(), { method: "GET" });
-}
-
-export async function plansRead(planPath: string): Promise<unknown> {
-  const url = new URL("/api/plans/read", window.location.origin);
-  url.searchParams.set("planPath", planPath);
-  return await apiJson<unknown>(url.toString(), { method: "GET" });
 }

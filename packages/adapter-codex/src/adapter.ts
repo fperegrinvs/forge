@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { AdapterEvent, AgentAdapter, RunContext, RunHandle } from "@forge/shared-utils";
+import { renderCodexJsonLine } from "./render.js";
 
 type CommandExecutor = (
   command: string,
@@ -90,21 +91,18 @@ export class CodexAdapter implements AgentAdapter {
         .filter(Boolean);
 
       for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line) as unknown;
-          const externalRunId = extractExternalRunId(parsed);
-          if (externalRunId) {
-            run.externalRunId = externalRunId;
-          }
-        } catch {
-          // Best effort parse: codex may emit non-JSON lines in mixed streams.
+        const rendered = renderCodexJsonLine(line);
+        if (rendered.parsed) {
+          const externalRunId = extractExternalRunId(rendered.parsed);
+          if (externalRunId) run.externalRunId = externalRunId;
         }
 
         yield {
           type: "run.output",
           runId,
           stream: "stdout",
-          chunk: line,
+          chunk: rendered.chunk,
+          ...(rendered.raw ? { raw: rendered.raw } : {}),
           at: new Date().toISOString()
         };
       }
@@ -205,15 +203,21 @@ export class CodexAdapter implements AgentAdapter {
       if (!line) continue;
 
       if (next.stream === "stdout") {
-        try {
-          const parsed = JSON.parse(line) as unknown;
-          const externalRunId = extractExternalRunId(parsed);
-          if (externalRunId) {
-            run.externalRunId = externalRunId;
-          }
-        } catch {
-          // Best effort parse
+        const rendered = renderCodexJsonLine(line);
+        if (rendered.parsed) {
+          const externalRunId = extractExternalRunId(rendered.parsed);
+          if (externalRunId) run.externalRunId = externalRunId;
         }
+
+        yield {
+          type: "run.output",
+          runId,
+          stream: "stdout",
+          chunk: rendered.chunk,
+          ...(rendered.raw ? { raw: rendered.raw } : {}),
+          at: new Date().toISOString()
+        };
+        continue;
       }
 
       yield {

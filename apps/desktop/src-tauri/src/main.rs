@@ -32,17 +32,6 @@ struct ValidationResult {
     issues: Vec<ValidationIssue>,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RunNextResult {
-    state: String,
-    task_id: Option<String>,
-    run_id: Option<String>,
-    external_run_id: Option<String>,
-    resume_command: Option<String>,
-    message: String,
-}
-
 #[tauri::command(rename_all = "camelCase")]
 async fn plan_validate(
     app: tauri::AppHandle,
@@ -83,81 +72,6 @@ async fn plan_validate(
     })
     .await
     .map_err(|error| format!("plan_validate task join failed: {error:?}"))?
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn run_next(
-    app: tauri::AppHandle,
-    project_root: String,
-    plan_path: String,
-    adapter: String
-) -> Result<RunNextResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(project_root);
-        let args = vec![
-            "run".to_string(),
-            "next".to_string(),
-            "--plan".to_string(),
-            plan_path,
-            "--adapter".to_string(),
-            adapter,
-            "--json".to_string(),
-        ];
-
-        let value = run_forge_json(&app, &cwd, &args)?;
-        Ok(RunNextResult {
-            state: value.get("state").and_then(|v| v.as_str()).unwrap_or("failed").to_string(),
-            task_id: value.get("taskId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            run_id: value.get("runId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            external_run_id: value.get("externalRunId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            resume_command: value.get("resumeCommand").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            message: value.get("message").and_then(|v| v.as_str()).unwrap_or("Run next").to_string(),
-        })
-    })
-    .await
-    .map_err(|error| format!("run_next task join failed: {error:?}"))?
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn pause_run(_run_id: String) -> bool {
-    // v1: pause is filesystem-mediated via the control-plane state; CLI pause isn't exposed yet.
-    true
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn resume_run(
-    app: tauri::AppHandle,
-    project_root: String,
-    plan_path: String,
-    run_id: String,
-    adapter: String
-) -> Result<RunNextResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(project_root);
-        let args = vec![
-            "run".to_string(),
-            "resume".to_string(),
-            "--plan".to_string(),
-            plan_path,
-            "--run-id".to_string(),
-            run_id,
-            "--adapter".to_string(),
-            adapter,
-            "--json".to_string(),
-        ];
-
-        let value = run_forge_json(&app, &cwd, &args)?;
-        Ok(RunNextResult {
-            state: value.get("state").and_then(|v| v.as_str()).unwrap_or("failed").to_string(),
-            task_id: value.get("taskId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            run_id: value.get("runId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            external_run_id: value.get("externalRunId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            resume_command: value.get("resumeCommand").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            message: value.get("message").and_then(|v| v.as_str()).unwrap_or("Resume").to_string(),
-        })
-    })
-    .await
-    .map_err(|error| format!("resume_run task join failed: {error:?}"))?
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -334,9 +248,6 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             plan_validate,
-            run_next,
-            pause_run,
-            resume_run,
             get_evidence,
             project_get_guidance_status,
             packs_list_installed,

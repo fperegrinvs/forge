@@ -17,14 +17,16 @@ describe("CodexAdapter", () => {
       allowedTools: []
     });
 
-    const events = [];
-    for await (const event of adapter.streamEvents(handle.runId)) {
-      events.push(event.type);
-    }
+    const events: any[] = [];
+    for await (const event of adapter.streamEvents(handle.runId)) events.push(event);
 
-    expect(events).toContain("run.started");
-    expect(events).toContain("run.output");
-    expect(events).toContain("run.completed");
+    expect(events.map((e) => e.type)).toContain("run.started");
+    expect(events.map((e) => e.type)).toContain("run.output");
+    expect(events.map((e) => e.type)).toContain("run.completed");
+
+    const output = events.find((e) => e.type === "run.output");
+    expect(output?.chunk).toBe("ok");
+    expect(output?.raw).toBe('{"type":"message","text":"ok"}');
   });
 
   it("captures external run id from json output and exposes it on resume", async () => {

@@ -119,6 +119,19 @@ export class ForgeControlPlane {
       await this.saveState(state);
     }
 
+    // Recover orphaned "running" tasks — if we're entering runNext, no run is active,
+    // so any "running" state is stale (e.g. from an interrupted previous run).
+    let recoveredRunning = false;
+    for (const [taskId, status] of Object.entries(state.tasks)) {
+      if (status === "running") {
+        state.tasks[taskId] = "pending";
+        recoveredRunning = true;
+      }
+    }
+    if (recoveredRunning) {
+      await this.saveState(state);
+    }
+
     const nextTask = plan.tasks.find(
       (task) =>
         state.tasks[task.id] === "pending" &&

@@ -11,7 +11,7 @@ export type RunContext = {
 
 export type AdapterEvent =
   | { type: "run.started"; runId: RunId; at: string }
-  | { type: "run.output"; runId: RunId; stream: "stdout" | "stderr"; chunk: string; at: string }
+  | { type: "run.output"; runId: RunId; stream: "stdout" | "stderr"; chunk: string; raw?: string; at: string }
   | { type: "run.tool"; runId: RunId; tool: string; status: "started" | "completed" | "failed"; at: string }
   | { type: "run.completed"; runId: RunId; exitCode: number; at: string }
   | { type: "run.failed"; runId: RunId; reason: string; at: string };

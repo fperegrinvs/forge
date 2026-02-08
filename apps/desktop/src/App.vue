@@ -52,7 +52,6 @@
                     <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" @click="showNewPlan = true">New Plan</v-btn>
                     <v-btn color="primary" @click="onValidate">Validate Plan</v-btn>
                     <v-btn color="primary" variant="outlined" @click="onRunNextStream">Run</v-btn>
-                    <v-btn color="primary" variant="text" @click="onRunNext">Run (Legacy)</v-btn>
                     <v-btn color="secondary" variant="outlined" @click="onOpenEvidence">Open Evidence</v-btn>
                   </div>
 
@@ -79,10 +78,7 @@
                   </div>
                 </v-card>
 
-                <v-card class="pa-4 mb-4">
-                  <h2 class="text-h6 mb-2">DAG</h2>
-                  <PlanGraph :tasks="tasks" />
-                </v-card>
+                <LiveOutputPane :segments="liveOutput" :tick="liveOutputTick" @clear="clearLiveOutput" />
 
                 <v-card class="pa-4">
                   <h2 class="text-h6 mb-2">Execution Log</h2>
@@ -229,7 +225,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import CreateProjectDialog from "./components/CreateProjectDialog.vue";
 import NewPlanDialog from "./components/NewPlanDialog.vue";
-import PlanGraph from "./components/PlanGraph.vue";
+import LiveOutputPane from "./components/LiveOutputPane.vue";
 import {
   getCwd,
   getEvidence,
@@ -238,11 +234,9 @@ import {
   packsListInstalled,
   planValidate,
   plansList,
-  plansRead,
   plansStatus,
   projectGetGuidanceStatus,
   projectInstallGuidance,
-  runNext,
   runNextStreamCancel,
   runNextStreamInput,
   runNextStreamUrl,
@@ -283,6 +277,36 @@ const streamId = ref("");
 const streamInput = ref("");
 let eventSource: EventSource | null = null;
 
+type LiveOutputSegment = {
+  stream: "stdout" | "stderr" | "system";
+  text: string;
+};
+
+const liveOutput = ref<LiveOutputSegment[]>([]);
+const liveOutputTick = ref(0);
+const MAX_OUTPUT_SEGMENTS = 2000;
+
+function clearLiveOutput(): void {
+  liveOutput.value = [];
+  liveOutputTick.value++;
+}
+
+function appendLiveOutput(stream: LiveOutputSegment["stream"], text: string): void {
+  if (!text) return;
+  const segments = liveOutput.value;
+  const last = segments.length > 0 ? segments[segments.length - 1] : undefined;
+  if (last && last.stream === stream) {
+    last.text += text;
+  } else {
+    segments.push({ stream, text });
+  }
+
+  if (segments.length > MAX_OUTPUT_SEGMENTS) {
+    segments.splice(0, segments.length - MAX_OUTPUT_SEGMENTS);
+  }
+  liveOutputTick.value++;
+}
+
 type DiscoveredPlan = {
   filename: string;
   path: string;
@@ -293,7 +317,6 @@ type DiscoveredPlan = {
 };
 
 const discoveredPlans = ref<DiscoveredPlan[]>([]);
-const tasks = ref<{ id: string; dependencies: string[] }[]>([]);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 const selectedPlanStatuses = computed(() => {
@@ -405,21 +428,6 @@ function onSelectPlan(plan: DiscoveredPlan): void {
   planPath.value = plan.path;
   logs.value.unshift(`Selected plan: ${plan.filename}`);
 
-  // Load the plan JSON to populate the DAG
-  plansRead(plan.path)
-    .then((json: unknown) => {
-      const planJson = json as { tasks?: { id: string; dependencies: string[] }[] };
-      if (Array.isArray(planJson.tasks)) {
-        tasks.value = planJson.tasks.map((t) => ({
-          id: t.id,
-          dependencies: Array.isArray(t.dependencies) ? t.dependencies : []
-        }));
-      }
-    })
-    .catch(() => {
-      logs.value.unshift("Could not parse plan for DAG");
-    });
-
   // Fetch task statuses
   plansStatus(projectRoot.value, plan.path)
     .then((status) => {
@@ -475,46 +483,6 @@ async function onValidate(): Promise<void> {
   }
 }
 
-async function onRunNext(): Promise<void> {
-  try {
-    current.state = "running";
-    current.taskId = undefined;
-    current.runId = undefined;
-    current.externalRunId = undefined;
-    current.resumeCommand = undefined;
-    current.message = "Running...";
-    logs.value.unshift("Run -> started");
-
-    const result = await runNext(projectRoot.value, planPath.value, adapter.value);
-    current.state = result.state;
-    current.taskId = result.taskId;
-    current.runId = result.runId;
-    current.externalRunId = result.externalRunId;
-    current.resumeCommand = result.resumeCommand;
-    current.message = result.message;
-    logs.value.unshift(`Run -> ${result.message}`);
-    if (result.runId) logs.value.unshift(`  runId: ${result.runId}`);
-    if (result.externalRunId) logs.value.unshift(`  externalRunId: ${result.externalRunId}`);
-    if (result.resumeCommand) logs.value.unshift(`  resume: ${result.resumeCommand}`);
-    if (result.classification) {
-      logs.value.unshift(`  classification: ${result.classification}`);
-    }
-    if (result.checksSummary?.length) {
-      for (const check of result.checksSummary) {
-        logs.value.unshift(`  ${check}`);
-      }
-    }
-    if (result.llmOutput?.length) {
-      logs.value.unshift("  adapter output (tail):");
-      for (const line of result.llmOutput) {
-        logs.value.unshift(`    ${line}`);
-      }
-    }
-  } catch (error) {
-    logs.value.unshift(`Run -> error: ${String(error)}`);
-  }
-}
-
 function stopStream(): void {
   streaming.value = false;
   if (eventSource) {
@@ -532,6 +500,7 @@ function pushLog(line: string): void {
 
 async function onRunNextStream(): Promise<void> {
   stopStream();
+  clearLiveOutput();
 
   current.state = "running";
   current.taskId = undefined;
@@ -554,7 +523,7 @@ async function onRunNextStream(): Promise<void> {
     try {
       parsed = JSON.parse(raw);
     } catch {
-      pushLog(`[sse] ${raw}`);
+      appendLiveOutput("system", raw.endsWith("\n") ? raw : `${raw}\n`);
       return;
     }
 
@@ -575,11 +544,15 @@ async function onRunNextStream(): Promise<void> {
       if (e?.type === "run.output") {
         const stream = String(e.stream ?? "stdout");
         const chunk = String(e.chunk ?? "");
-        pushLog(`  [${stream}] ${chunk}`);
+        appendLiveOutput(stream === "stderr" ? "stderr" : "stdout", chunk);
+      } else if (e?.type === "run.tool") {
+        const tool = String(e.tool ?? "tool");
+        const status = String(e.status ?? "");
+        appendLiveOutput("system", `[tool] ${tool}${status ? ` ${status}` : ""}\n`);
       } else if (e?.type === "run.failed") {
-        pushLog(`  [failed] ${String(e.reason ?? "")}`);
+        appendLiveOutput("stderr", `[failed] ${String(e.reason ?? "")}\n`);
       } else if (e?.type) {
-        pushLog(`  [event] ${String(e.type)}`);
+        appendLiveOutput("system", `[event] ${String(e.type)}\n`);
       }
       return;
     }
@@ -621,7 +594,7 @@ async function onRunNextStream(): Promise<void> {
       return;
     }
 
-    pushLog(type ? `  [${type}] ${raw}` : `  [sse] ${raw}`);
+    appendLiveOutput("system", type ? `[${type}] ${raw}\n` : `${raw}\n`);
   });
 
   eventSource.addEventListener("error", () => {

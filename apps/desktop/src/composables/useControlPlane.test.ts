@@ -19,7 +19,6 @@ import {
   runNextStreamCancel,
   runNextStreamInput,
   runNextStreamUrl,
-  runNext,
   selectFolder
 } from "./useControlPlane";
 
@@ -46,25 +45,6 @@ describe("useControlPlane", () => {
     expect(url).toBe("/api/plan/validate");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json" }));
-    expect(init?.headers).toBeInstanceOf(Headers);
-    expect((init!.headers as Headers).get("content-type")).toBe("application/json");
-  });
-
-  it("calls run_next", async () => {
-    // Given the backend returns a completed run result
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ state: "completed", runId: "run-1", message: "done" })
-    });
-    // When run next is requested
-    const result = await runNext("/tmp/project", "/tmp/plan.json", "codex");
-    // Then the API is called with expected args and the state is returned
-    expect(result.state).toBe("completed");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("/api/run/next");
-    expect(init?.method).toBe("POST");
-    expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json", adapter: "codex" }));
     expect(init?.headers).toBeInstanceOf(Headers);
     expect((init!.headers as Headers).get("content-type")).toBe("application/json");
   });
