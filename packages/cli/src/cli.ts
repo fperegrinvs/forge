@@ -2,7 +2,7 @@
 import { join, resolve } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import { ForgeControlPlane, ForgeWorkflowRunner } from "@forge/control-plane";
+import { ForgeControlPlane, ForgeWorkflowRunner, renderWorkflowProgress } from "@forge/control-plane";
 import { CodexAppServerAdapter } from "@forge/adapter-codex";
 import { ClaudePtyAdapter } from "@forge/adapter-claude";
 import { exists, readJsonFile, runCommand } from "@forge/shared-utils";
@@ -438,6 +438,7 @@ export function buildCli(): Command {
     .action(async (options: JsonFlag & { plan: string; adapter: AdapterName; maxRetries: string; push: boolean; remote: string; dryRun?: boolean }) => {
       try {
         const workspaceRoot = process.cwd();
+        const planPath = resolve(options.plan);
         const maxRetries = Number.parseInt(options.maxRetries, 10);
         if (!Number.isFinite(maxRetries) || maxRetries < 1) {
           throw new Error("--max-retries must be a positive integer");
@@ -520,14 +521,52 @@ export function buildCli(): Command {
         // Keep a hard cap to avoid infinite loops on buggy status transitions.
         const maxSteps = 5000;
         for (let i = 0; i < maxSteps; i += 1) {
-          const step = await runner.runAuto(resolve(options.plan), options.adapter, {
+          const step = await runner.runAuto(planPath, options.adapter, {
             maxRetries,
             push: options.push && !options.dryRun,
             remote: options.remote
           });
 
           if (step.state === "running") {
+            if (!options.json && !options.dryRun) {
+              try {
+                const raw = await readFile(planPath, "utf8");
+                const plan = JSON.parse(raw) as {
+                  tasks: Array<{
+                    id: string;
+                    task_type: string;
+                    name: string;
+                    description: string;
+                    dependencies: string[];
+                    status?: "" | "spec" | "implement" | "refactor" | "document" | "completed";
+                  }>;
+                };
+                process.stderr.write(renderWorkflowProgress(plan));
+                process.stderr.write(`Last step: ${step.taskId} phase=${step.phase}\n`);
+              } catch {
+                // ignore (best-effort UX)
+              }
+            }
             continue;
+          }
+
+          if (!options.json && !options.dryRun) {
+            try {
+              const raw = await readFile(planPath, "utf8");
+              const plan = JSON.parse(raw) as {
+                tasks: Array<{
+                  id: string;
+                  task_type: string;
+                  name: string;
+                  description: string;
+                  dependencies: string[];
+                  status?: "" | "spec" | "implement" | "refactor" | "document" | "completed";
+                }>;
+              };
+              process.stderr.write(renderWorkflowProgress(plan));
+            } catch {
+              // ignore (best-effort UX)
+            }
           }
           output(options.json ? step : step.message, options.json);
           return;
