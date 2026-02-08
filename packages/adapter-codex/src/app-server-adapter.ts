@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { createInterface as createPromptInterface } from "node:readline/promises";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AdapterEvent, AgentAdapter, RunContext, RunHandle } from "@forge/shared-utils";
 
@@ -225,7 +226,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
 
       // Auto-respond to server-initiated requests (approvals / user input).
       if (isJsonRpcRequest(msg)) {
-        this.handleServerRequest(msg);
+        await this.handleServerRequest(msg);
         continue;
       }
 
@@ -284,7 +285,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     return threadId;
   }
 
-  private handleServerRequest(req: JsonRpcRequest): void {
+  private async handleServerRequest(req: JsonRpcRequest): Promise<void> {
     const method = req.method;
     const params = req.params;
 
@@ -297,6 +298,18 @@ export class CodexAppServerAdapter implements AgentAdapter {
       return;
     }
     if (method === "item/tool/requestUserInput") {
+      const answers = await this.buildUserInputAnswers(params);
+      this.client.respond(req.id, { answers });
+      return;
+    }
+
+    // Unknown request: decline by default.
+    this.client.respond(req.id, {});
+  }
+
+  private async buildUserInputAnswers(params: unknown): Promise<Record<string, { answers: string[] }>> {
+    // Non-interactive: choose the first option (best-effort) so the workflow can continue.
+    if (!process.stdin.isTTY) {
       const answers: Record<string, { answers: string[] }> = {};
       if (isRecord(params) && Array.isArray(params.questions)) {
         for (const q of params.questions) {
@@ -306,12 +319,54 @@ export class CodexAppServerAdapter implements AgentAdapter {
           answers[q.id] = { answers: first ? [first] : [] };
         }
       }
-      this.client.respond(req.id, { answers });
-      return;
+      return answers;
     }
 
-    // Unknown request: decline by default.
-    this.client.respond(req.id, {});
+    const answers: Record<string, { answers: string[] }> = {};
+    const rl = createPromptInterface({ input: process.stdin, output: process.stderr });
+    try {
+      const qs = isRecord(params) && Array.isArray(params.questions) ? params.questions : [];
+      for (const q of qs) {
+        if (!isRecord(q) || typeof q.id !== "string") continue;
+        const questionText =
+          typeof q.question === "string"
+            ? q.question
+            : typeof q.prompt === "string"
+              ? q.prompt
+              : `Question ${q.id}`;
+
+        process.stderr.write(`\nCodex requests user input: ${questionText}\n`);
+
+        const opts = Array.isArray(q.options) ? q.options : [];
+        const labels: string[] = [];
+        for (const opt of opts) {
+          if (isRecord(opt) && typeof opt.label === "string") labels.push(opt.label);
+        }
+
+        let selected = "";
+        if (labels.length > 0) {
+          for (let i = 0; i < labels.length; i += 1) {
+            process.stderr.write(`  ${String(i + 1)}. ${labels[i] ?? ""}\n`);
+          }
+          const raw = (await rl.question("> ")).trim();
+          const idx = Number.parseInt(raw, 10);
+          if (Number.isFinite(idx) && idx >= 1 && idx <= labels.length) {
+            selected = labels[idx - 1] ?? "";
+          } else if (labels.includes(raw)) {
+            selected = raw;
+          } else {
+            selected = labels[0] ?? "";
+          }
+        } else {
+          selected = (await rl.question("> ")).trim();
+        }
+
+        answers[q.id] = { answers: selected ? [selected] : [] };
+      }
+    } finally {
+      rl.close();
+    }
+    return answers;
   }
 }
 

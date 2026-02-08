@@ -91,12 +91,13 @@ let threadId = "thread-1";
 let turnId = "turn-1";
 
 let approved = false;
+let fileApproved = false;
 let answered = false;
 
 function send(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
 
 function maybeComplete() {
-  if (!approved || !answered) return;
+  if (!approved || !fileApproved || !answered) return;
   send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [] } } });
   process.exit(0);
 }
@@ -123,6 +124,7 @@ rl.on("line", (line) => {
     send({ id: msg.id, result: { turn: { id: turnId, status: "inProgress", items: [] } } });
     // Server-initiated requests the client must answer.
     send({ id: 200, method: "item/commandExecution/requestApproval", params: { threadId, turnId } });
+    send({ id: 202, method: "item/fileChange/requestApproval", params: { threadId, turnId } });
     send({
       id: 201,
       method: "item/tool/requestUserInput",
@@ -137,6 +139,11 @@ rl.on("line", (line) => {
   if (msg && typeof msg === "object" && typeof msg.id !== "undefined" && typeof msg.method === "undefined") {
     if (msg.id === 200) {
       approved = msg.result && msg.result.decision === "acceptForSession";
+      maybeComplete();
+      return;
+    }
+    if (msg.id === 202) {
+      fileApproved = msg.result && msg.result.decision === "acceptForSession";
       maybeComplete();
       return;
     }
