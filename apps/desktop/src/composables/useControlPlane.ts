@@ -43,9 +43,16 @@ export type GuidanceManifest = {
   workflowPolicyHash?: string;
 };
 
+export type GuidanceSource = {
+  installedAt: string;
+  pack: { name: string; version: string; path: string };
+  forceReplace: boolean;
+};
+
 export type ProjectGuidanceStatus = {
   installed: boolean;
   manifest?: GuidanceManifest;
+  source?: GuidanceSource;
 };
 
 export type InstalledPack = {

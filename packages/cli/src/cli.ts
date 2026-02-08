@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { ForgeControlPlane } from "@forge/control-plane";
 import {
   getBundledGuidanceRoot,
   installGuidance,
   installGuidanceFromPackRoot,
+  registerCodexSkills,
   summarizeGuidanceDiff
 } from "@forge/guidance-pack";
 import { initProject, scaffoldModule } from "@forge/templates";
@@ -50,6 +52,36 @@ function fail(error: unknown): never {
   exit(ExitCode.RuntimeFailed);
 }
 
+type ProjectGuidanceSource = {
+  installedAt: string;
+  pack: { name: string; version: string; path: string };
+  forceReplace: boolean;
+  installer: "forge-cli";
+};
+
+async function readPackManifest(packRoot: string): Promise<{ name: string; version: string } | undefined> {
+  try {
+    const raw = await readFile(join(packRoot, "manifest.json"), "utf8");
+    const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown };
+    const name = typeof parsed.name === "string" ? parsed.name : "";
+    const version = typeof parsed.version === "string" ? parsed.version : "";
+    if (!name || !version) return undefined;
+    return { name, version };
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeGuidanceSourceFile(targetRoot: string, value: ProjectGuidanceSource): Promise<void> {
+  // Best-effort metadata; never fail the command on write issues.
+  try {
+    await mkdir(join(targetRoot, ".forge"), { recursive: true });
+    await writeFile(join(targetRoot, ".forge", "guidance.json"), `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  } catch {
+    // ignore
+  }
+}
+
 function formatRunResult(result: {
   state: string;
   message: string;
@@ -85,6 +117,18 @@ export function buildCli(): Command {
       try {
         const createdPath = await initProject(projectName, process.cwd());
         const guidanceResult = options.skipGuidance ? undefined : await installGuidance(createdPath);
+        if (guidanceResult) {
+          const bundledRoot = getBundledGuidanceRoot();
+          const manifest = await readPackManifest(bundledRoot);
+          if (manifest) {
+            await writeGuidanceSourceFile(createdPath, {
+              installedAt: new Date().toISOString(),
+              pack: { ...manifest, path: bundledRoot },
+              forceReplace: false,
+              installer: "forge-cli"
+            });
+          }
+        }
         output(
           options.json
             ? {
@@ -148,12 +192,22 @@ export function buildCli(): Command {
             throw new Error("--path is required when --source path is used");
           }
 
-          const result = await installGuidanceFromPackRoot(resolve(options.path), process.cwd(), {
+          const sourcePath = resolve(options.path);
+          const result = await installGuidanceFromPackRoot(sourcePath, process.cwd(), {
             forceReplace: options.forceReplace ?? false
           });
+          const manifest = await readPackManifest(sourcePath);
+          if (manifest) {
+            await writeGuidanceSourceFile(process.cwd(), {
+              installedAt: new Date().toISOString(),
+              pack: { ...manifest, path: sourcePath },
+              forceReplace: options.forceReplace ?? false,
+              installer: "forge-cli"
+            });
+          }
           output(
             options.json
-              ? { success: true, source: resolve(options.path), result }
+              ? { success: true, source: sourcePath, result }
               : `Guidance installed: ${summarizeGuidanceDiff(result)}`,
             options.json
           );
@@ -161,6 +215,16 @@ export function buildCli(): Command {
         }
 
         const result = await installGuidance(process.cwd(), { forceReplace: options.forceReplace ?? false });
+        const bundledRoot = getBundledGuidanceRoot();
+        const manifest = await readPackManifest(bundledRoot);
+        if (manifest) {
+          await writeGuidanceSourceFile(process.cwd(), {
+            installedAt: new Date().toISOString(),
+            pack: { ...manifest, path: bundledRoot },
+            forceReplace: options.forceReplace ?? false,
+            installer: "forge-cli"
+          });
+        }
         output(
           options.json
             ? { success: true, source: getBundledGuidanceRoot(), result }
@@ -243,6 +307,24 @@ export function buildCli(): Command {
             at: new Date().toISOString()
           });
 
+          if (options.adapter === "codex") {
+            try {
+              const skillsDir = join(process.cwd(), "skills");
+              const preflight = await registerCodexSkills(skillsDir, process.cwd());
+              writeLine({
+                type: "preflight.codex_skills",
+                updated: preflight.updated,
+                at: new Date().toISOString()
+              });
+            } catch (error) {
+              writeLine({
+                type: "preflight.codex_skills.error",
+                message: String(error),
+                at: new Date().toISOString()
+              });
+            }
+          }
+
           const result = await controlPlane.runNext(resolve(options.plan), options.adapter, undefined, {
             onAdapterEvent: (event) => {
               writeLine({ type: "adapter.event", event });
@@ -254,6 +336,15 @@ export function buildCli(): Command {
             exit(ExitCode.RuntimeFailed);
           }
           return;
+        }
+
+        if (options.adapter === "codex") {
+          try {
+            const skillsDir = join(process.cwd(), "skills");
+            await registerCodexSkills(skillsDir, process.cwd());
+          } catch (error) {
+            process.stderr.write(`[warn] codex skills preflight failed: ${String(error)}\n`);
+          }
         }
 
         const result = await controlPlane.runNext(resolve(options.plan), options.adapter);

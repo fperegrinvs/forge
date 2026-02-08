@@ -113,17 +113,45 @@ struct GuidanceManifest {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct GuidanceSourcePack {
+    name: String,
+    version: String,
+    path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GuidanceSource {
+    installed_at: String,
+    pack: GuidanceSourcePack,
+    force_replace: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProjectGuidanceStatus {
     installed: bool,
     manifest: Option<GuidanceManifest>,
+    source: Option<GuidanceSource>,
 }
 
 #[tauri::command(rename_all = "camelCase")]
 async fn project_get_guidance_status(project_root: String) -> Result<ProjectGuidanceStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let source = {
+            let source_path = PathBuf::from(&project_root).join(".forge").join("guidance.json");
+            if source_path.exists() {
+                fs::read_to_string(&source_path)
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<GuidanceSource>(&raw).ok())
+            } else {
+                None
+            }
+        };
+
         let path = PathBuf::from(project_root).join("manifest.json");
         if !path.exists() {
-            return Ok(ProjectGuidanceStatus { installed: false, manifest: None });
+            return Ok(ProjectGuidanceStatus { installed: false, manifest: None, source });
         }
         let raw = fs::read_to_string(path).map_err(|error| format!("read manifest.json: {error}"))?;
         let value = serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| format!("parse manifest.json: {error}"))?;
@@ -136,6 +164,7 @@ async fn project_get_guidance_status(project_root: String) -> Result<ProjectGuid
                 workflow_policy_version: value.get("workflow_policy_version").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 workflow_policy_hash: value.get("workflow_policy_hash").and_then(|v| v.as_str()).map(|s| s.to_string()),
             }),
+            source,
         })
     })
     .await

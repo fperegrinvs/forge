@@ -111,6 +111,11 @@ describe("cli", () => {
     // Given a guidance source directory and a target directory
     const source = await mkdtemp(join(tmpdir(), "forge-guidance-src-"));
     const target = await mkdtemp(join(tmpdir(), "forge-guidance-dst-"));
+    await writeFile(
+      join(source, "manifest.json"),
+      JSON.stringify({ name: "test-pack", version: "1.2.3" }, null, 2),
+      "utf8"
+    );
     await mkdir(join(source, "rules"), { recursive: true });
     await writeFile(join(source, "rules", "example.md"), "ok\n", "utf8");
 
@@ -142,6 +147,11 @@ describe("cli", () => {
       expect(parsed.success).toBe(true);
       expect(parsed.source).toBeTruthy();
       expect(parsed.result.installed).toContain("rules/example.md");
+
+      const guidanceSource = await readFile(join(target, ".forge", "guidance.json"), "utf8");
+      const sourceParsed = JSON.parse(guidanceSource) as { pack: { name: string; version: string; path: string } };
+      expect(sourceParsed.pack.name).toBe("test-pack");
+      expect(sourceParsed.pack.version).toBe("1.2.3");
     } finally {
       process.chdir(previous);
     }
@@ -173,6 +183,11 @@ describe("cli", () => {
       expect(parsed.success).toBe(true);
       expect(parsed.source).toBeTruthy();
       expect(parsed.result).toBeTruthy();
+
+      const guidanceSource = await readFile(join(target, ".forge", "guidance.json"), "utf8");
+      const sourceParsed = JSON.parse(guidanceSource) as { pack: { name: string; version: string } };
+      expect(sourceParsed.pack.name).toBeTruthy();
+      expect(sourceParsed.pack.version).toBeTruthy();
     } finally {
       process.chdir(previous);
     }
@@ -365,6 +380,8 @@ describe("cli", () => {
     const root = await mkdtemp(join(tmpdir(), "forge-run-jsonl-"));
     await mkdir(join(root, "checks", "task-types", "documentation"), { recursive: true });
     await mkdir(join(root, ".forge"), { recursive: true });
+    await mkdir(join(root, "skills", "test-skill"), { recursive: true });
+    await writeFile(join(root, "skills", "test-skill", "SKILL.md"), "# test-skill\n\nhello\n", "utf8");
 
     const now = new Date().toISOString();
     const plan = {
@@ -437,6 +454,9 @@ describe("cli", () => {
       const last = JSON.parse(lines[lines.length - 1]!) as { type: string; result: { state: string } };
       expect(last.type).toBe("run.next.result");
       expect(last.result.state).toBe("completed");
+
+      const installedSkill = await readFile(join(root, ".agents", "skills", "test-skill", "SKILL.md"), "utf8");
+      expect(installedSkill).toContain("# test-skill");
     } finally {
       process.chdir(previous);
     }

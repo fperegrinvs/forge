@@ -33,6 +33,10 @@ Forge monorepo implementing Phase 0-2 components from `docs/components-deep-dive
 - `@forge/cli`: `packages/cli/README.md`
 - `@forge/shared-utils`: `packages/shared-utils/README.md`
 
+## Desktop Packs
+
+Forge Desktop can download packs (from GitHub Releases) and install a selected pack into a project root. See `apps/desktop/README.md` for the pack selection and install/update/replace workflow.
+
 ## Quickstart
 
 1. Run `./scripts/bootstrap-toolchain.sh --check`.

@@ -21,6 +21,28 @@ export function resolveAgentsPrecedence(): string[] {
   return ["global", "repo_root", "nearest_directory_override"];
 }
 
+async function listSkillEntries(skillsDir: string): Promise<Array<{ name: string; skillMdPath: string }>> {
+  if (!(await exists(skillsDir))) {
+    return [];
+  }
+
+  const entries = await readdir(skillsDir, { withFileTypes: true });
+  const skills: Array<{ name: string; skillMdPath: string }> = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const skillMdPath = join(skillsDir, entry.name, "SKILL.md");
+    if (!(await exists(skillMdPath))) {
+      continue;
+    }
+    skills.push({ name: entry.name, skillMdPath });
+  }
+
+  return skills;
+}
+
 export async function discoverSkills(guidanceRoot: string): Promise<SkillDescriptor[]> {
   const skillsDir = join(guidanceRoot, "skills");
   if (!(await exists(skillsDir))) {
@@ -61,29 +83,50 @@ export function stripFrontmatter(content: string): string {
   return afterFrontmatter.replace(/^\n+/, "");
 }
 
+export async function registerCodexSkills(
+  skillsDir: string,
+  targetRoot: string
+): Promise<{ updated: string[] }> {
+  const updated: string[] = [];
+  const skills = await listSkillEntries(skillsDir);
+  if (skills.length === 0) {
+    return { updated };
+  }
+
+  for (const skill of skills) {
+    const content = await readFile(skill.skillMdPath, "utf8");
+    const contentBytes = Buffer.from(content, "utf8");
+
+    const codexDir = join(targetRoot, ".agents", "skills", skill.name);
+    const codexPath = join(codexDir, "SKILL.md");
+    await mkdir(codexDir, { recursive: true });
+
+    let codexChanged = true;
+    if (await exists(codexPath)) {
+      const existing = await readFile(codexPath);
+      if (hashBytes(existing) === hashBytes(contentBytes)) {
+        codexChanged = false;
+      }
+    }
+
+    if (codexChanged) {
+      await writeFile(codexPath, content, "utf8");
+      updated.push(skill.name);
+    }
+  }
+
+  return { updated };
+}
+
 export async function registerSkillCommands(
   skillsDir: string,
   targetRoot: string
 ): Promise<RegisteredCommands> {
   const result: RegisteredCommands = { claude: [], codex: [] };
 
-  if (!(await exists(skillsDir))) {
-    return result;
-  }
-
-  const entries = await readdir(skillsDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-
-    const skillMdPath = join(skillsDir, entry.name, "SKILL.md");
-    if (!(await exists(skillMdPath))) {
-      continue;
-    }
-
-    const content = await readFile(skillMdPath, "utf8");
+  const skills = await listSkillEntries(skillsDir);
+  for (const entry of skills) {
+    const content = await readFile(entry.skillMdPath, "utf8");
     const contentBytes = Buffer.from(content, "utf8");
     const strippedContent = stripFrontmatter(content);
     const strippedBytes = Buffer.from(strippedContent, "utf8");
