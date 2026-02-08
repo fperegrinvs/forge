@@ -76,8 +76,8 @@ describe("NewPlanDialog adapter-specific instructions", () => {
     // Given the codex adapter
     // When getting the skill invocation
     const result = getSkillInvocation("codex");
-    // Then it returns a mention with description prompt
-    expect(result).toBe("Mention `$plan-guided` and describe your feature");
+    // Then it indicates the guided flow starts automatically
+    expect(result).toBe("Guided plan creation starts automatically");
   });
 
   it("falls back to slash command for unknown adapters", () => {

@@ -107,8 +107,11 @@ describe("useControlPlane", () => {
   });
 
   it("builds codex_session_stream URL with expected query params", async () => {
+    // Given a project root
+    // When the codex session stream URL is built for guided planning
     const url = codexSessionStreamUrl("/tmp/project");
-    expect(url).toBe("http://localhost:1420/api/codex/session/stream?projectRoot=%2Ftmp%2Fproject");
+    // Then it includes the projectRoot and the plan-guided auto skill flag
+    expect(url).toBe("http://localhost:1420/api/codex/session/stream?projectRoot=%2Ftmp%2Fproject&autoSkill=plan-guided");
   });
 
   it("calls codex_session_send", async () => {
