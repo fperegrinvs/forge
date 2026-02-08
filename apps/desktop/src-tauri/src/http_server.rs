@@ -796,39 +796,102 @@ struct PlanFileEntry {
     path: String,
 }
 
+fn list_plans(project_root: &str) -> Result<Vec<PlanFileEntry>, String> {
+    let plans_dir = PathBuf::from(project_root).join("plans");
+    if !plans_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    struct PlanWithTime {
+        entry: PlanFileEntry,
+        modified: std::time::Duration,
+    }
+
+    let mut entries: Vec<PlanWithTime> = Vec::new();
+    let read_dir = std::fs::read_dir(&plans_dir)
+        .map_err(|e| format!("read plans dir: {e}"))?;
+
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+
+        let filename = match path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+
+        let modified = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .unwrap_or(std::time::Duration::from_secs(0));
+
+        entries.push(PlanWithTime {
+            entry: PlanFileEntry {
+                filename,
+                path: path.to_string_lossy().to_string(),
+            },
+            modified,
+        });
+    }
+
+    // Newest first, stable tie-breaker by filename.
+    entries.sort_by(|a, b| {
+        b.modified
+            .cmp(&a.modified)
+            .then_with(|| a.entry.filename.cmp(&b.entry.filename))
+    });
+
+    Ok(entries.into_iter().map(|e| e.entry).collect())
+}
+
 async fn plans_list(
     Query(query): Query<PlansListQuery>,
 ) -> Result<Json<Vec<PlanFileEntry>>, (StatusCode, String)> {
     tauri::async_runtime::spawn_blocking(move || {
-        let plans_dir = PathBuf::from(&query.project_root).join("plans");
-        if !plans_dir.exists() {
-            return Ok::<_, String>(vec![]);
-        }
-        let mut entries = Vec::new();
-        let read_dir = std::fs::read_dir(&plans_dir)
-            .map_err(|e| format!("read plans dir: {e}"))?;
-        for entry in read_dir {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                    entries.push(PlanFileEntry {
-                        filename: filename.to_string(),
-                        path: path.to_string_lossy().to_string(),
-                    });
-                }
-            }
-        }
-        entries.sort_by(|a, b| a.filename.cmp(&b.filename));
-        Ok(entries)
+        list_plans(&query.project_root)
     })
     .await
     .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
     .map(Json)
     .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
+#[cfg(test)]
+mod plans_list_tests {
+    use super::list_plans;
+    use std::fs;
+    use std::thread;
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    #[test]
+    fn sorts_plans_by_modified_desc() {
+        let root = std::env::temp_dir().join(format!("forge-desktop-plans-{}", Uuid::new_v4()));
+        let plans_dir = root.join("plans");
+        fs::create_dir_all(&plans_dir).unwrap();
+
+        let a = plans_dir.join("a.json");
+        let b = plans_dir.join("b.json");
+
+        fs::write(&a, r#"{"name":"a"}"#).unwrap();
+        // Ensure the filesystem sees distinct mtimes even on coarse-resolution filesystems.
+        thread::sleep(Duration::from_millis(1200));
+        fs::write(&b, r#"{"name":"b"}"#).unwrap();
+
+        let entries = list_plans(root.to_str().unwrap()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].filename, "b.json");
+        assert_eq!(entries[1].filename, "a.json");
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
 
 #[derive(Deserialize)]

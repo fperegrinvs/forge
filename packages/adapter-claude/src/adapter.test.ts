@@ -3,6 +3,43 @@ import { ClaudeAdapter } from "./adapter.js";
 import "./index.js";
 
 describe("ClaudeAdapter", () => {
+  it("invokes claude with non-interactive flags and allowedTools", async () => {
+    // Given a ClaudeAdapter that records the CLI args used for a run
+    let observedArgs: string[] = [];
+    const adapter = new ClaudeAdapter(async (_cmd, args) => {
+      observedArgs = args;
+      return { exitCode: 0, stdout: '{"type":"assistant","text":"ok"}\n', stderr: "" };
+    });
+
+    // When we start a run and stream events (triggering execution)
+    const handle = await adapter.startRun({
+      taskId: "task-args",
+      prompt: "hello world",
+      workingDirectory: process.cwd(),
+      allowedTools: []
+    });
+
+    // streamEvents triggers the execution path.
+    for await (const _event of adapter.streamEvents(handle.runId)) {
+      // drain
+    }
+
+    // Then we include the non-interactive flags and tool allowlist, and the prompt is positional
+    expect(observedArgs).toContain("--permission-mode");
+    expect(observedArgs).toContain("dontAsk");
+    expect(observedArgs).toContain("--include-partial-messages");
+    expect(observedArgs).toContain("--allowedTools");
+
+    const allowedIdx = observedArgs.indexOf("--allowedTools");
+    expect(allowedIdx).toBeGreaterThanOrEqual(0);
+    expect(observedArgs.slice(allowedIdx + 1)).toContain("Bash(git:*)");
+    expect(observedArgs.slice(allowedIdx + 1)).toContain("Edit");
+    expect(observedArgs.slice(allowedIdx + 1)).toContain("Read");
+
+    // Prompt should be the final positional arg.
+    expect(observedArgs[observedArgs.length - 1]).toBe("hello world");
+  });
+
   it("emits started output and completed events", async () => {
     const adapter = new ClaudeAdapter(async () => ({
       exitCode: 0,

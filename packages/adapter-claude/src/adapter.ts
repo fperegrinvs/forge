@@ -11,8 +11,57 @@ type CommandExecutor = (
   env: Record<string, string>
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
+type RunState = {
+  context: RunContext;
+  externalRunId?: string;
+};
+
+const externalRunIdKeys = new Set(["thread_id", "threadId", "session_id", "sessionId"]);
+
+function extractExternalRunId(payload: unknown): string | undefined {
+  const queue: unknown[] = [payload];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") {
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(current)) {
+      if (externalRunIdKeys.has(key) && typeof value === "string" && value.trim().length > 0) {
+        return value;
+      }
+
+      if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+const DEFAULT_ALLOWED_TOOLS = ["Bash(git:*)", "Edit", "Read"];
+
+function buildClaudeArgs(context: RunContext): string[] {
+  const allowed = context.allowedTools.length > 0 ? context.allowedTools : DEFAULT_ALLOWED_TOOLS;
+
+  // Important: Claude Code expects options before the positional prompt for some shells/parsers.
+  return [
+    "--print",
+    "--output-format",
+    "stream-json",
+    "--include-partial-messages",
+    "--permission-mode",
+    "dontAsk",
+    "--allowedTools",
+    ...allowed,
+    context.prompt
+  ];
+}
+
 export class ClaudeAdapter implements AgentAdapter {
-  private readonly runs = new Map<string, RunContext>();
+  private readonly runs = new Map<string, RunState>();
 
   constructor(
     private readonly execute?: CommandExecutor,
@@ -21,13 +70,13 @@ export class ClaudeAdapter implements AgentAdapter {
 
   startRun(context: RunContext): Promise<RunHandle> {
     const runId = randomUUID();
-    this.runs.set(runId, context);
+    this.runs.set(runId, { context });
     return Promise.resolve({ runId });
   }
 
   async *streamEvents(runId: string): AsyncIterable<AdapterEvent> {
-    const context = this.runs.get(runId);
-    if (!context) {
+    const run = this.runs.get(runId);
+    if (!run) {
       yield {
         type: "run.failed",
         runId,
@@ -39,9 +88,14 @@ export class ClaudeAdapter implements AgentAdapter {
 
     yield { type: "run.started", runId, at: new Date().toISOString() };
 
-    const args = ["-p", context.prompt, "--output-format", "stream-json"];
+    const args = buildClaudeArgs(run.context);
     if (this.execute) {
-      const result = await this.execute(this.command, args, context.workingDirectory, context.env ?? {});
+      const result = await this.execute(
+        this.command,
+        args,
+        run.context.workingDirectory,
+        run.context.env ?? {}
+      );
 
       const lines = result.stdout
         .split("\n")
@@ -50,6 +104,10 @@ export class ClaudeAdapter implements AgentAdapter {
 
       for (const line of lines) {
         const rendered = renderClaudeStreamJsonLine(line);
+        if (rendered.parsed) {
+          const externalRunId = extractExternalRunId(rendered.parsed);
+          if (externalRunId) run.externalRunId = externalRunId;
+        }
         if (rendered.tool) {
           yield {
             type: "run.tool",
@@ -94,9 +152,10 @@ export class ClaudeAdapter implements AgentAdapter {
     }
 
     const child = spawn(this.command, args, {
-      cwd: context.workingDirectory,
-      env: { ...process.env, ...(context.env ?? {}) },
-      stdio: ["inherit", "pipe", "pipe"]
+      cwd: run.context.workingDirectory,
+      env: { ...process.env, ...(run.context.env ?? {}) },
+      // Non-interactive: avoid hanging waiting for permissions/input.
+      stdio: ["ignore", "pipe", "pipe"]
     });
 
     const queue: Array<{ stream: "stdout" | "stderr"; line: string }> = [];
@@ -159,6 +218,10 @@ export class ClaudeAdapter implements AgentAdapter {
 
       if (next.stream === "stdout") {
         const rendered = renderClaudeStreamJsonLine(line);
+        if (rendered.parsed) {
+          const externalRunId = extractExternalRunId(rendered.parsed);
+          if (externalRunId) run.externalRunId = externalRunId;
+        }
         if (rendered.tool) {
           yield {
             type: "run.tool",
@@ -203,8 +266,12 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 
   resume(runId: string): Promise<RunHandle> {
-    if (!this.runs.has(runId)) {
+    const run = this.runs.get(runId);
+    if (!run) {
       return Promise.reject(new Error(`run not found: ${runId}`));
+    }
+    if (run.externalRunId) {
+      return Promise.resolve({ runId, externalRunId: run.externalRunId });
     }
     return Promise.resolve({ runId });
   }

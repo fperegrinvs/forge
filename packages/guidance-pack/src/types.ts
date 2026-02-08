@@ -1,5 +1,6 @@
 export type InstallGuidanceOptions = {
   forceReplace?: boolean;
+  installGitHooks?: boolean;
 };
 
 export type InstallGuidanceResult = {

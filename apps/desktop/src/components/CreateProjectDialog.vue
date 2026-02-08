@@ -11,7 +11,7 @@
           @click="onBrowse"
         >
           <template #append>
-            <v-btn size="small" variant="text" @click="onBrowse">Browse</v-btn>
+            <v-btn size="small" variant="text" @click.stop="onBrowse">Browse</v-btn>
           </template>
         </v-text-field>
 
