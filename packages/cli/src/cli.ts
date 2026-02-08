@@ -474,6 +474,12 @@ export function buildCli(): Command {
             return claudeAdapter;
           },
           {
+            onAdapterEvent: (event) => {
+              if (options.json || options.dryRun) return;
+              if (event.type === "run.output") {
+                process.stderr.write(event.chunk);
+              }
+            },
             gateRunner: async (phase: string, cwd: string) => {
               if (options.dryRun) {
                 return { ok: true, stdout: "dry-run", stderr: "", exitCode: 0 };
