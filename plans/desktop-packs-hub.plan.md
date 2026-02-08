@@ -5,9 +5,9 @@ Date: 2026-02-07
 ## Summary
 Use the existing Tauri desktop app (`apps/desktop`) as a stable distribution hub that:
 
-- Ships a stable execution core (Forge CLI sidecar) inside the notarized desktop app bundle.
+- Ships a stable execution core (Forge sidecar) inside the notarized desktop app bundle.
 - Downloads frequently-updated, non-executable "packs" (starting with `forge-guidance-pack`) from GitHub Releases.
-- Installs pack contents into a selected project via the bundled Forge CLI in JSON mode.
+- Installs pack contents into a selected project via the bundled Forge sidecar (JSON output).
 
 v1 explicitly avoids downloading/executing updated binaries outside the app bundle to reduce macOS Gatekeeper/quarantine/notarization friction.
 
@@ -17,16 +17,16 @@ v1 explicitly avoids downloading/executing updated binaries outside the app bund
 - Pack integrity verification (hash) and safe extraction (path traversal and symlink rejection).
 
 ## Non-goals (v1)
-- In-app executable updates (CLI/control-plane) downloaded from the internet.
+- In-app executable updates (sidecar/control-plane) downloaded from the internet.
 - Open third-party plugin ecosystem (arbitrary repos) without allowlisting and stronger trust model.
 
 ## Distribution Model
 
 ### Executable Core (Bundled With App)
-- Forge Desktop runs `forge` via a sidecar command runner (JSON output).
+- Forge Desktop runs the internal sidecar via a command runner (JSON output).
 - Supported resolution:
-  - `FORGE_DESKTOP_FORGE_BIN` points at a `forge` executable, or
-  - `FORGE_DESKTOP_FORGE_ENTRY_JS` points at `packages/cli/dist/bin.js` and desktop runs `node <entry>`.
+  - `FORGE_DESKTOP_SIDECAR_BIN` points at a sidecar executable, or
+  - `FORGE_DESKTOP_SIDECAR_ENTRY_JS` points at `packages/sidecar/dist/entry.js` and desktop runs `node <entry>`.
 
 ### Packs (Downloaded From GitHub Releases)
 - Desktop downloads `packs-index.json` from the configured repo's "latest" release.
@@ -82,4 +82,3 @@ Minimal index shape:
 - Given a project with locally modified guidance files, when guidance is installed without force replace, then local edits are preserved.
 - Given a tampered pack archive, when sha256 does not match, then installation is blocked.
 - Given an archive with path traversal entries, when extracted, then installation is blocked.
-

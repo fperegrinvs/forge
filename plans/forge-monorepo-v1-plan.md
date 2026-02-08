@@ -4,6 +4,8 @@
 Implement all four proposed components in `/Users/simon/projects/forge` as a layered Bun workspace monorepo, scoped to Phases 0-2 from `/Users/simon/projects/forge/docs/components-deep-dive.md`: contracts/schema, template+scaffolder+guidance, and a functional desktop orchestrator MVP.  
 Decisions locked from this thread: layered packages, local template source for `forge init`, functional desktop MVP, full Codex + Claude adapters, and prerequisite bootstrap first (Bun + Rust).
 
+**Note (2026-02-08)**: Forge is Desktop-only in this repo. The public `@forge/cli` package has been removed and replaced by an internal `@forge/sidecar` process spawned by Desktop.
+
 ## Monorepo Structure
 ```text
 /Users/simon/projects/forge/
@@ -17,7 +19,7 @@ Decisions locked from this thread: layered packages, local template source for `
     adapter-codex/                    # Codex runtime adapter
     adapter-claude/                   # Claude runtime adapter
     check-runner/                     # task_type -> check script execution + normalization
-    cli/                              # forge CLI surface
+    sidecar/                          # internal desktop sidecar process
     guidance-pack/                    # distributable guidance artifact + install logic
     templates/                        # local template assets + module scaffolder templates
     shared-utils/                     # JSON IO, process, logging helpers
@@ -96,10 +98,8 @@ Decisions locked from this thread: layered packages, local template source for `
    - Add deterministic failure handling policy from vision (transient/structural/semantic/infrastructure actions).
    - Acceptance: orchestration tests for happy path, failed check pause, adapter failure classification, resume from filesystem state.
 
-8. Implement `@forge/cli`.
-   - Wire public commands to templates/guidance/contracts/control-plane packages.
-   - Implement stable `--json` output and categorized non-zero exit codes.
-   - Acceptance: command smoke tests for `init`, `scaffold module`, `install-guidance`, `plan validate`, `run next`.
+8. Implement `@forge/sidecar`.
+   - Provide an internal JSON-over-stdin/stdout protocol for the Desktop backend to run validation, guidance install, workflow auto, and Codex sessions.
 
 9. Implement desktop app MVP (`apps/desktop`).
    - Tauri + Vue + Vuetify shell.

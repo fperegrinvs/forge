@@ -1,6 +1,6 @@
 # @forge/guidance-pack
 
-Bundled guidance assets (AGENTS/rules/skills) and installer logic used by `forge install-guidance`.
+Bundled guidance assets (AGENTS/rules/skills) and installer logic used by Forge Desktop (via the internal sidecar).
 
 ## Commands
 
@@ -18,4 +18,3 @@ Repo-level workflow assets are generated from policy:
 bun run workflow:sync
 bun run workflow:check-sync
 ```
-

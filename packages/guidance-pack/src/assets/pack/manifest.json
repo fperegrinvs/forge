@@ -2,7 +2,7 @@
   "name": "forge-guidance-pack",
   "version": "1.0.0",
   "workflow_policy_version": "1.2.0",
-  "workflow_policy_hash": "cf885fd4bb907ed9130ddff7cae931bf1dadfcfe7618f2e651c3adf430d8adf9",
+  "workflow_policy_hash": "ddfedfabde3177aa0bc015634813bea6c08734fa7ddb767c98fa09948d76488f",
   "default_phase_gate_bindings": {
     "spec": "scripts/phase-gates/spec.sh",
     "implement": "scripts/phase-gates/implement.sh",
