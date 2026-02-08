@@ -30,7 +30,7 @@ export type WorkflowAutoOptions = {
 
 export type WorkflowAutoResult =
   | { state: "running"; taskId: string; phase: string }
-  | { state: "paused"; taskId: string; phase: string; message: string }
+  | { state: "paused"; taskId: string; phase: string; message: string; externalRunId?: string; resumeCommand?: string }
   | { state: "completed"; message: string };
 
 export class ForgeWorkflowRunner {
@@ -66,8 +66,12 @@ export class ForgeWorkflowRunner {
     const approvalMode = resolveApprovalMode();
 
     const basePrompt = renderPrompt(planPath, nextTask, phase);
+    let lastGateSummary: string | undefined;
+    let lastExternalRunId: string | undefined;
     for (let attempt = 1; attempt <= Math.max(1, options.maxRetries); attempt += 1) {
-      const prompt = attempt === 1 ? basePrompt : `${basePrompt}\n\nRetry ${String(attempt)}: Fix gate failures and try again.`;
+      const retryHeader = attempt === 1 ? "" : `\n\nRetry ${String(attempt)}: Fix the gate failures and try again.`;
+      const gateContext = lastGateSummary ? `\n\nPrevious gate output:\n${lastGateSummary}` : "";
+      const prompt = `${basePrompt}${retryHeader}${gateContext}`;
       const ctx: RunContext = {
         taskId: nextTask.id,
         prompt,
@@ -79,6 +83,13 @@ export class ForgeWorkflowRunner {
       const handle = await adapter.startRun(ctx);
       for await (const event of adapter.streamEvents(handle.runId)) {
         this.deps.onAdapterEvent?.(event);
+      }
+
+      try {
+        const resumed = await adapter.resume(handle.runId);
+        if (resumed.externalRunId) lastExternalRunId = resumed.externalRunId;
+      } catch {
+        // ignore
       }
 
       const gate = await this.deps.gateRunner(phase, this.workspaceRoot);
@@ -104,15 +115,27 @@ export class ForgeWorkflowRunner {
 
         return { state: "running", taskId: nextTask.id, phase };
       }
+
+      lastGateSummary = `gate=${gate.name ?? phase} exitCode=${String(gate.exitCode)}\n${gate.stdout}${gate.stderr}`.trim();
     }
 
     return {
       state: "paused",
       taskId: nextTask.id,
       phase,
+      ...(lastExternalRunId ? { externalRunId: lastExternalRunId } : {}),
+      ...(() => {
+        if (!lastExternalRunId) return {};
+        const resumeCommand = buildResumeCommand(adapterType, lastExternalRunId);
+        return resumeCommand ? { resumeCommand } : {};
+      })(),
       message: `Gate failed for phase '${phase}' after ${String(options.maxRetries)} attempts.`
     };
   }
+}
+
+function buildResumeCommand(adapterType: AdapterType, externalRunId: string): string | undefined {
+  return adapterType === "codex" ? `codex resume ${externalRunId}` : `claude --resume ${externalRunId}`;
 }
 
 type PlanLike = {
