@@ -11,6 +11,7 @@ bun run --filter @forge/desktop dev
 bun run --filter @forge/desktop dev:singleport
 bun run dev:desktop:tauri
 bun run dev:desktop:tauri:oneshot
+bun run dev:desktop:tauri:noreload
 bun run --filter @forge/desktop build
 bun run --filter @forge/desktop test
 bun run --filter @forge/desktop typecheck
@@ -24,6 +25,7 @@ Notes:
 - The desktop UI talks to the backend via HTTP `/api/*` (single origin), not Tauri `invoke()`.
 - `bun run dev:desktop:tauri` is the recommended way to start Tauri in dev (it starts the watcher + `cargo tauri dev`).
 - `bun run dev:desktop:tauri:oneshot` runs a one-time frontend build then starts Tauri (no watch, single process after startup).
+- `bun run dev:desktop:tauri:noreload` runs a one-time frontend build and starts Tauri with its watcher disabled (`cargo tauri dev --no-watch`).
 
 ## Plans
 
