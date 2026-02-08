@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "workflow_policy_version": "1.2.0",
   "workflow_policy_hash": "44d421522adf9a87ba04f5204c40d5c91314357f74e069dff262d8e4754ed81a",
+  "default_phase_gate_bindings": {
+    "spec": "scripts/phase-gates/spec.sh",
+    "implement": "scripts/phase-gates/implement.sh",
+    "refactor": "scripts/phase-gates/refactor.sh",
+    "document": "scripts/phase-gates/document.sh",
+    "commit": "scripts/phase-gates/commit.sh"
+  },
   "context": {
     "max_read_bytes": 262144
   },

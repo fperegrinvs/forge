@@ -396,11 +396,20 @@ async function listFiles(rootDir) {
 async function buildExpectedAssets(policy) {
   const policyHash = createPolicyHash(policy);
 
+  const phaseGates = policy.workflow.phase_gates ?? {};
+  const phaseGateScriptsDirRel = "scripts/phase-gates";
+  const defaultPhaseGateBindings = {};
+  for (const phase of policy.workflow.phases ?? []) {
+    // Bind every known phase to a policy-generated gate wrapper script by default.
+    defaultPhaseGateBindings[phase] = `${phaseGateScriptsDirRel}/${phase}.sh`;
+  }
+
   const manifest = {
     name: "forge-guidance-pack",
     version: "1.0.0",
     workflow_policy_version: policy.version,
     workflow_policy_hash: policyHash,
+    default_phase_gate_bindings: defaultPhaseGateBindings,
     context: {
       max_read_bytes: 262144
     },
@@ -463,6 +472,19 @@ async function buildExpectedAssets(policy) {
       const scriptPath = join(checksRoot, taskType, `gate-${gate}.sh`);
       expectedScripts.set(scriptPath, renderGateScript(command));
     }
+  }
+
+  // Phase-level gate wrapper scripts live inside the pack itself so they can be
+  // referenced via project-relative bindings seeded from the pack manifest.
+  for (const phase of policy.workflow.phases ?? []) {
+    const cfg = phaseGates[phase];
+    const gate = cfg?.gate;
+    const command = gate ? policy.commands.gates[gate] : null;
+    if (!command) {
+      throw new Error(`Unknown or missing phase gate command for phase '${phase}' (gate='${String(gate)}')`);
+    }
+    const scriptPath = join(guidanceRoot, phaseGateScriptsDirRel, `${phase}.sh`);
+    expectedScripts.set(scriptPath, renderGateScript(command));
   }
 
   const expectedSymlinks = new Map();

@@ -68,6 +68,24 @@ export type PackUpdateStatus = {
   hasUpdate: boolean;
 };
 
+export type WorkflowPhase = {
+  id: string;
+  gate: string;
+  commit: boolean;
+  diagnostic: boolean;
+};
+
+export type PackContent = {
+  name: string;
+  version: string;
+  phases: WorkflowPhase[];
+  rules: string[];
+  skills: string[];
+  defaultPhaseGateBindings: Record<string, string>;
+};
+
+export type PhaseGateBindings = Record<string, string | null>;
+
 export async function planValidate(projectRoot: string, planPath: string): Promise<ValidateResult> {
   return await apiJson<ValidateResult>("/api/plan/validate", {
     method: "POST",
@@ -125,6 +143,12 @@ export async function packsDownload(packName: string, version?: string): Promise
   });
 }
 
+export async function packsGetContent(packPath: string): Promise<PackContent> {
+  const url = new URL("/api/packs/content", window.location.origin);
+  url.searchParams.set("packPath", packPath);
+  return await apiJson<PackContent>(url.toString(), { method: "GET" });
+}
+
 export async function projectInstallGuidance(
   projectRoot: string,
   packPath: string,
@@ -174,6 +198,28 @@ export async function getCwd(): Promise<string> {
 export async function selectFolder(): Promise<string | null> {
   const result = await apiJson<{ path: string | null }>("/api/dialog/select-folder", { method: "GET" });
   return result.path;
+}
+
+export async function selectFile(projectRoot: string): Promise<string | null> {
+  const url = new URL("/api/dialog/select-file", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  const result = await apiJson<{ path: string | null }>(url.toString(), { method: "GET" });
+  return result.path;
+}
+
+export async function phaseGatesGet(projectRoot: string): Promise<PhaseGateBindings> {
+  const url = new URL("/api/phase-gates", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  const result = await apiJson<{ phases: PhaseGateBindings }>(url.toString(), { method: "GET" });
+  return result.phases;
+}
+
+export async function phaseGatesPut(projectRoot: string, phases: PhaseGateBindings): Promise<PhaseGateBindings> {
+  const result = await apiJson<{ phases: PhaseGateBindings }>("/api/phase-gates", {
+    method: "PUT",
+    body: JSON.stringify({ projectRoot, phases })
+  });
+  return result.phases;
 }
 
 export type PlanFileEntry = { filename: string; path: string; modifiedMs: number };

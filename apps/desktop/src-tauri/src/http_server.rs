@@ -27,6 +27,7 @@ use crate::packs::{
     compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs,
     read_bundled_packs, read_installed_packs, read_pack_content, PackContent,
 };
+use crate::phase_gates::{read_phase_gates, write_phase_gates, PhaseGateBindings};
 use crate::terminal::TerminalManager;
 
 #[derive(Clone)]
@@ -815,6 +816,132 @@ async fn select_folder() -> Json<SelectFolderResult> {
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectFileResult {
+    path: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectFileQuery {
+    project_root: String,
+}
+
+async fn select_file(
+    Query(query): Query<SelectFileQuery>,
+) -> Result<Json<SelectFileResult>, (StatusCode, String)> {
+    let project_root = PathBuf::from(query.project_root);
+    let result = tokio::task::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            .set_title("Select Validation Script")
+            .set_directory(project_root)
+            .add_filter("Shell Script", &["sh"])
+            .pick_file()
+    })
+    .await
+    .ok()
+    .flatten();
+
+    Ok(Json(SelectFileResult {
+        path: result.map(|p| p.to_string_lossy().to_string()),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhaseGatesQuery {
+    project_root: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PhaseGatesResponse {
+    phases: std::collections::BTreeMap<String, Option<String>>,
+}
+
+fn bindings_to_response(bindings: PhaseGateBindings) -> PhaseGatesResponse {
+    let mut phases = std::collections::BTreeMap::new();
+    for (phase, path) in bindings.0 {
+        phases.insert(phase, path.map(|p| p.to_string_lossy().to_string()));
+    }
+    PhaseGatesResponse { phases }
+}
+
+async fn phase_gates_get(
+    Query(query): Query<PhaseGatesQuery>,
+) -> Result<Json<PhaseGatesResponse>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = PathBuf::from(query.project_root);
+        let bindings = read_phase_gates(&root)?;
+        Ok::<_, String>(bindings_to_response(bindings))
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhaseGatesPutRequest {
+    project_root: String,
+    phases: std::collections::BTreeMap<String, Option<String>>,
+}
+
+fn validate_relative_no_traversal(path: &std::path::Path) -> Result<(), String> {
+    if path.is_absolute() {
+        return Err("script path must be relative to project root".to_string());
+    }
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("script path must not contain '..'".to_string());
+        }
+    }
+    Ok(())
+}
+
+async fn phase_gates_put(
+    Json(body): Json<PhaseGatesPutRequest>,
+) -> Result<Json<PhaseGatesResponse>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = PathBuf::from(&body.project_root);
+
+        let mut out: std::collections::BTreeMap<String, Option<PathBuf>> = std::collections::BTreeMap::new();
+        for (phase, path) in body.phases {
+            let normalized = match path {
+                None => None,
+                Some(raw) => {
+                    if raw.trim_start().starts_with('~') {
+                        return Err("script path must be project-relative (no '~')".to_string());
+                    }
+                    let candidate = PathBuf::from(raw);
+                    if candidate.is_absolute() {
+                        let rel = candidate
+                            .strip_prefix(&root)
+                            .map_err(|_| "selected script must be inside the project root".to_string())?
+                            .to_path_buf();
+                        validate_relative_no_traversal(&rel)?;
+                        Some(rel)
+                    } else {
+                        validate_relative_no_traversal(&candidate)?;
+                        Some(candidate)
+                    }
+                }
+            };
+            out.insert(phase, normalized);
+        }
+
+        let bindings = PhaseGateBindings(out);
+        write_phase_gates(&root, &bindings)?;
+        Ok::<_, String>(bindings_to_response(bindings))
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlansListQuery {
@@ -1224,6 +1351,8 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/plans/status", get(plans_status))
         .route("/api/plans/read", get(plans_read))
         .route("/api/dialog/select-folder", get(select_folder))
+        .route("/api/dialog/select-file", get(select_file))
+        .route("/api/phase-gates", get(phase_gates_get).put(phase_gates_put))
         .route("/api/terminal/spawn", post(terminal_spawn))
         .route("/api/terminal/:id", delete(terminal_kill))
         .route("/api/terminal/:id/resize", post(terminal_resize))

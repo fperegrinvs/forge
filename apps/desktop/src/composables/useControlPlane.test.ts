@@ -9,7 +9,10 @@ import {
   listTemplates,
   packsCheckUpdates,
   packsDownload,
+  packsGetContent,
   packsListInstalled,
+  phaseGatesGet,
+  phaseGatesPut,
   planValidate,
   plansList,
   plansStatus,
@@ -19,6 +22,7 @@ import {
   runNextStreamCancel,
   runNextStreamInput,
   runNextStreamUrl,
+  selectFile,
   selectFolder
 } from "./useControlPlane";
 
@@ -224,6 +228,70 @@ describe("useControlPlane", () => {
     const result = await selectFolder();
     // Then it returns null
     expect(result).toBeNull();
+  });
+
+  it("packsGetContent calls GET /api/packs/content with packPath query param", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        name: "forge-guidance-pack",
+        version: "1.0.0",
+        phases: [],
+        rules: [],
+        skills: [],
+        defaultPhaseGateBindings: { spec: "scripts/phase-gates/spec.sh" }
+      })
+    });
+
+    const result = await packsGetContent("/packs/x");
+    expect(result.name).toBe("forge-guidance-pack");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://localhost:1420/api/packs/content?packPath=%2Fpacks%2Fx");
+    expect(init?.method).toBe("GET");
+  });
+
+  it("selectFile calls GET /api/dialog/select-file with projectRoot query param", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ path: "/tmp/project/scripts/spec.sh" })
+    });
+
+    const path = await selectFile("/tmp/project");
+    expect(path).toBe("/tmp/project/scripts/spec.sh");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://localhost:1420/api/dialog/select-file?projectRoot=%2Ftmp%2Fproject");
+    expect(init?.method).toBe("GET");
+  });
+
+  it("phaseGatesGet calls GET /api/phase-gates and returns phases map", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ phases: { spec: "scripts/phase-gates/spec.sh" } })
+    });
+
+    const phases = await phaseGatesGet("/tmp/project");
+    expect(phases).toEqual({ spec: "scripts/phase-gates/spec.sh" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://localhost:1420/api/phase-gates?projectRoot=%2Ftmp%2Fproject");
+    expect(init?.method).toBe("GET");
+  });
+
+  it("phaseGatesPut calls PUT /api/phase-gates and returns saved phases map", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ phases: { spec: null } })
+    });
+
+    const phases = await phaseGatesPut("/tmp/project", { spec: null });
+    expect(phases).toEqual({ spec: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/phase-gates");
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", phases: { spec: null } }));
   });
 
   it("plansList calls GET /api/plans/list and returns PlanFileEntry[]", async () => {

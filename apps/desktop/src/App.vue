@@ -255,6 +255,83 @@
                   </v-list>
                 </v-card>
 
+                <v-card v-if="selectedPackContent" class="pa-4 mb-4">
+                  <h2 class="text-h6 mb-2">Workflow</h2>
+
+                  <v-alert v-if="!selectedPackContent.phases.length" type="info" variant="tonal" class="mb-3">
+                    This pack does not define a workflow table in AGENTS.md (no phases to render).
+                  </v-alert>
+
+                  <div v-else class="mb-3">
+                    <div class="text-body-2 mb-2">
+                      Phases are shown in order. Select one to bind a validation script for this project.
+                    </div>
+                    <v-list density="compact" class="workflow-list">
+                      <v-list-item
+                        v-for="item in phaseItems"
+                        :key="item.id"
+                        :active="item.id === selectedPhaseId"
+                        @click="selectedPhaseId = item.id"
+                      >
+                        <template #title>
+                          <div class="d-flex align-center ga-2">
+                            <strong>{{ item.id }}</strong>
+                            <v-chip
+                              size="x-small"
+                              :color="item.status === 'custom' ? 'success' : item.status === 'default' ? 'primary' : item.status === 'disabled' ? 'grey' : 'grey'"
+                              variant="tonal"
+                            >
+                              {{ item.status }}
+                            </v-chip>
+                            <v-chip v-if="item.diagnostic" size="x-small" color="warning" variant="tonal">diagnostic</v-chip>
+                          </div>
+                        </template>
+                        <template #subtitle>
+                          <span>gate: {{ item.gate }}</span>
+                        </template>
+                      </v-list-item>
+                    </v-list>
+                  </div>
+
+                  <v-alert v-if="phaseGateError" type="error" variant="tonal" class="mb-3">
+                    {{ phaseGateError }}
+                  </v-alert>
+
+                  <div v-if="selectedPackContent.phases.length" class="d-flex flex-wrap ga-2 align-center mb-3">
+                    <v-select
+                      v-model="selectedPhaseId"
+                      :items="selectedPackContent.phases"
+                      item-title="id"
+                      item-value="id"
+                      label="Selected phase"
+                      density="compact"
+                      hide-details
+                      style="min-width: 220px"
+                    />
+                    <v-btn color="primary" variant="outlined" :disabled="!selectedPhaseId || phaseGateBusy" @click="onBindSelectedPhase">
+                      Bind script...
+                    </v-btn>
+                    <v-btn color="secondary" variant="outlined" :disabled="!selectedPhaseId || phaseGateBusy" @click="onResetSelectedPhaseToDefault">
+                      Reset to default
+                    </v-btn>
+                    <v-btn color="secondary" variant="outlined" :disabled="!selectedPhaseId || phaseGateBusy" @click="onDisableSelectedPhase">
+                      Disable
+                    </v-btn>
+                  </div>
+
+                  <div v-if="selectedPhase" class="text-body-2">
+                    <p class="mb-1"><strong>Gate:</strong> {{ selectedPhase.gate }}</p>
+                    <p class="mb-1"><strong>Diagnostic:</strong> <span>{{ selectedPhase.diagnostic ? "yes" : "no" }}</span></p>
+                    <p class="mb-1"><strong>Default script:</strong> <code>{{ selectedPhaseDefaultScript || "-" }}</code></p>
+                    <p class="mb-0">
+                      <strong>Project binding:</strong>
+                      <code v-if="selectedPhaseBinding === null">disabled</code>
+                      <code v-else-if="typeof selectedPhaseBinding === 'string'">{{ selectedPhaseBinding }}</code>
+                      <span v-else>-</span>
+                    </p>
+                  </div>
+                </v-card>
+
                 <v-card class="pa-4">
                   <h2 class="text-h6 mb-2">Packs Log</h2>
                   <v-list density="compact">
@@ -281,7 +358,10 @@ import {
   getEvidence,
   packsCheckUpdates,
   packsDownload,
+  packsGetContent,
   packsListInstalled,
+  phaseGatesGet,
+  phaseGatesPut,
   planValidate,
   plansList,
   plansStatus,
@@ -290,15 +370,31 @@ import {
   runNextStreamCancel,
   runNextStreamInput,
   runNextStreamUrl,
+  selectFile,
   selectFolder,
   type InstalledPack,
   type PackUpdateStatus,
+  type PackContent,
+  type PhaseGateBindings,
   type PlanFileEntry,
   type ProjectGuidanceStatus,
   type RunNextResult,
   type TaskStatus,
   type ValidationIssue
 } from "./composables/useControlPlane";
+
+function computePhaseBindingStatus(
+  phaseId: string,
+  bindings: PhaseGateBindings,
+  defaults: Record<string, string>
+): "custom" | "default" | "disabled" | "unbound" {
+  const bound = bindings[phaseId];
+  if (bound === null) return "disabled";
+  if (typeof bound === "string") {
+    return defaults[phaseId] && bound === defaults[phaseId] ? "default" : "custom";
+  }
+  return "unbound";
+}
 
 const tab = ref<"orchestrate" | "packs">("orchestrate");
 const showCreateProject = ref(false);
@@ -323,6 +419,41 @@ const selectedPackPath = ref<string>("");
 const forceReplace = ref(false);
 const installedPacks = ref<InstalledPack[]>([]);
 const packLogs = ref<string[]>([]);
+
+const selectedPackContent = ref<PackContent | null>(null);
+const phaseGateBindings = ref<PhaseGateBindings>({});
+const selectedPhaseId = ref<string>("");
+const phaseGateError = ref<string>("");
+const phaseGateBusy = ref(false);
+
+const selectedPhase = computed(() => {
+  const phases = selectedPackContent.value?.phases ?? [];
+  return phases.find((p) => p.id === selectedPhaseId.value);
+});
+
+const phaseItems = computed(() => {
+  const content = selectedPackContent.value;
+  if (!content) return [];
+  const defaults = content.defaultPhaseGateBindings ?? {};
+  return content.phases.map((p) => ({
+    id: p.id,
+    gate: p.gate,
+    diagnostic: p.diagnostic,
+    status: computePhaseBindingStatus(p.id, phaseGateBindings.value, defaults)
+  }));
+});
+
+const selectedPhaseDefaultScript = computed(() => {
+  const phase = selectedPhaseId.value;
+  if (!phase) return "";
+  return selectedPackContent.value?.defaultPhaseGateBindings?.[phase] ?? "";
+});
+
+const selectedPhaseBinding = computed(() => {
+  const phase = selectedPhaseId.value;
+  if (!phase) return undefined;
+  return phaseGateBindings.value[phase];
+});
 
 function parseSemver(value: string): [number, number, number] | null {
   const core = value.split("-")[0]?.split("+")[0] ?? "";
@@ -567,6 +698,10 @@ watch(projectRoot, () => {
   // When switching projects, refresh pack + guidance context automatically.
   onRefreshGuidance();
   onListInstalledPacks();
+
+  if (selectedPackPath.value) {
+    void loadSelectedPackDetails();
+  }
 });
 
 watch(selectedPackName, () => {
@@ -574,6 +709,15 @@ watch(selectedPackName, () => {
   const versions = downloadedVersionsForSelected.value;
   if (!versions.some((v) => v.path === selectedPackPath.value)) {
     selectedPackPath.value = versions[0]?.path ?? "";
+  }
+});
+
+watch(selectedPackPath, () => {
+  if (selectedPackPath.value) {
+    void loadSelectedPackDetails();
+  } else {
+    selectedPackContent.value = null;
+    selectedPhaseId.value = "";
   }
 });
 
@@ -930,8 +1074,113 @@ async function onInstallGuidance(): Promise<void> {
   }
 }
 
+function effectivePhaseGateBindings(): PhaseGateBindings {
+  const next: PhaseGateBindings = {};
+  const phases = selectedPackContent.value?.phases ?? [];
+  const defaults = selectedPackContent.value?.defaultPhaseGateBindings ?? {};
+
+  for (const phase of phases) {
+    if (Object.prototype.hasOwnProperty.call(phaseGateBindings.value, phase.id)) {
+      next[phase.id] = phaseGateBindings.value[phase.id] ?? null;
+      continue;
+    }
+    if (defaults[phase.id]) {
+      next[phase.id] = defaults[phase.id]!;
+      continue;
+    }
+    next[phase.id] = null;
+  }
+
+  // Preserve any extra keys already present in the project file.
+  for (const [phase, value] of Object.entries(phaseGateBindings.value)) {
+    if (!Object.prototype.hasOwnProperty.call(next, phase)) {
+      next[phase] = value ?? null;
+    }
+  }
+
+  return next;
+}
+
+async function loadSelectedPackDetails(): Promise<void> {
+  if (!selectedPackPath.value) return;
+  phaseGateError.value = "";
+
+  try {
+    selectedPackContent.value = await packsGetContent(selectedPackPath.value);
+    if (!selectedPhaseId.value && selectedPackContent.value.phases.length > 0) {
+      selectedPhaseId.value = selectedPackContent.value.phases[0]!.id;
+    }
+  } catch (error) {
+    selectedPackContent.value = null;
+    phaseGateBindings.value = {};
+    selectedPhaseId.value = "";
+    packLogs.value.unshift(`Pack content error: ${String(error)}`);
+    return;
+  }
+
+  try {
+    phaseGateBindings.value = await phaseGatesGet(projectRoot.value);
+  } catch (error) {
+    phaseGateBindings.value = {};
+    phaseGateError.value = String(error);
+    packLogs.value.unshift(`Phase gates error: ${String(error)}`);
+  }
+}
+
+async function savePhaseGateBinding(phaseId: string, value: string | null): Promise<void> {
+  phaseGateError.value = "";
+  phaseGateBusy.value = true;
+  try {
+    const next = effectivePhaseGateBindings();
+    next[phaseId] = value;
+    phaseGateBindings.value = await phaseGatesPut(projectRoot.value, next);
+  } catch (error) {
+    phaseGateError.value = String(error);
+    packLogs.value.unshift(`Phase gates save error: ${String(error)}`);
+  } finally {
+    phaseGateBusy.value = false;
+  }
+}
+
+async function onBindSelectedPhase(): Promise<void> {
+  const phaseId = selectedPhaseId.value;
+  if (!phaseId) return;
+
+  try {
+    const path = await selectFile(projectRoot.value);
+    if (!path) return;
+    await savePhaseGateBinding(phaseId, path);
+  } catch (error) {
+    phaseGateError.value = String(error);
+    packLogs.value.unshift(`Select file error: ${String(error)}`);
+  }
+}
+
+async function onResetSelectedPhaseToDefault(): Promise<void> {
+  const phaseId = selectedPhaseId.value;
+  if (!phaseId) return;
+  const def = selectedPhaseDefaultScript.value;
+  await savePhaseGateBinding(phaseId, def || null);
+}
+
+async function onDisableSelectedPhase(): Promise<void> {
+  const phaseId = selectedPhaseId.value;
+  if (!phaseId) return;
+  await savePhaseGateBinding(phaseId, null);
+}
+
 function onSelectInstalledPack(pack: InstalledPack): void {
   selectedPackName.value = pack.name;
   selectedPackPath.value = pack.path;
+  void loadSelectedPackDetails();
 }
 </script>
+
+<style scoped>
+.workflow-list {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.015);
+}
+</style>

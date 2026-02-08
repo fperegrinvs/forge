@@ -1,6 +1,6 @@
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -19,6 +19,54 @@ function hashBytes(value: Uint8Array): string {
 
 export function resolveAgentsPrecedence(): string[] {
   return ["global", "repo_root", "nearest_directory_override"];
+}
+
+function isSafeProjectRelativePath(value: string): boolean {
+  if (!value) return false;
+  if (isAbsolute(value)) return false;
+  // Reject traversal and home shortcuts; these bindings must be project-relative and portable.
+  if (value.startsWith("~")) return false;
+  const parts = value.split(/[\\/]+/g).filter(Boolean);
+  if (parts.includes("..")) return false;
+  return true;
+}
+
+async function readDefaultPhaseGateBindings(packRoot: string): Promise<Record<string, string>> {
+  try {
+    const raw = await readFile(join(packRoot, "manifest.json"), "utf8");
+    const parsed = JSON.parse(raw) as { default_phase_gate_bindings?: unknown };
+    const bindings = parsed.default_phase_gate_bindings;
+    if (!bindings || typeof bindings !== "object") return {};
+
+    const record: Record<string, string> = {};
+    for (const [phase, script] of Object.entries(bindings as Record<string, unknown>)) {
+      if (typeof phase !== "string" || !phase) continue;
+      if (typeof script !== "string" || !isSafeProjectRelativePath(script)) continue;
+      record[phase] = script;
+    }
+    return record;
+  } catch {
+    return {};
+  }
+}
+
+async function seedPhaseGatesIfMissing(
+  packRoot: string,
+  targetRoot: string
+): Promise<"seeded" | "skipped" | "no-defaults"> {
+  const outPath = join(targetRoot, ".forge", "phase-gates.json");
+  if (await exists(outPath)) {
+    return "skipped";
+  }
+
+  const defaults = await readDefaultPhaseGateBindings(packRoot);
+  if (Object.keys(defaults).length === 0) {
+    return "no-defaults";
+  }
+
+  await mkdir(dirname(outPath), { recursive: true });
+  await writeFile(outPath, `${JSON.stringify(defaults, null, 2)}\n`, "utf8");
+  return "seeded";
 }
 
 async function listSkillEntries(skillsDir: string): Promise<Array<{ name: string; skillMdPath: string }>> {
@@ -251,6 +299,16 @@ export async function installGuidanceFromPackRoot(
     } catch {
       // best-effort: guidance should still install even if git isn't available
     }
+  }
+
+  // Best-effort project-scoped config seed (never overwrites).
+  try {
+    const seeded = await seedPhaseGatesIfMissing(packRoot, targetRoot);
+    if (seeded === "seeded") {
+      result.installed.push(join(".forge", "phase-gates.json"));
+    }
+  } catch {
+    // ignore
   }
 
   return result;

@@ -13,6 +13,9 @@ Track repository-level technical decisions and rationale.
 - Stabilized the Codex terminal used by New Plan: keep PTY master alive across WS reconnects, buffer initial output until WS attach, and (macOS only) wrap `codex` in `/usr/bin/script` to avoid Codex aborting on stdout writes; also improved WS error reporting and focus.
 - Added a pre-push git hook to run `typecheck` before pushing (configurable via env), shipped and auto-configured via guidance pack install when `.githooks/` is present and `core.hooksPath` is unset.
 - Desktop Packs tab now supports selecting a pack name, downloading latest, selecting a downloaded version, and installing/updating/replacing the project pack; switching pack names warns about mixed state unless force replace is used.
+- Guidance packs now provide default phase gate bindings via `manifest.json` (`default_phase_gate_bindings`) and ship policy-generated shell wrappers under `scripts/phase-gates/*.sh`.
+- `installGuidance` seeds project-scoped `.forge/phase-gates.json` from the selected pack defaults when missing, and never overwrites an existing file.
+- Desktop Packs tab now shows a selected pack's workflow phases/gates (as a simple ordered list) and allows binding per-phase validation scripts via a native file picker; bindings persist per project in `.forge/phase-gates.json`.
 - `forge install-guidance` now writes best-effort `.forge/guidance.json` metadata recording the installed pack name/version/path and timestamp; Desktop surfaces this as the project's pack source.
 - `forge run next --adapter codex` now performs a lightweight preflight to sync `skills/*/SKILL.md` into `.agents/skills/*/SKILL.md` so Codex-native skill discovery stays consistent.
 

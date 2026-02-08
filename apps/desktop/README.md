@@ -40,6 +40,7 @@ Forge Desktop can download non-executable "packs" (starting with `forge-guidance
 - **Downloaded pack**: A pack directory stored in the Desktop app data dir (fetched from GitHub Releases or bundled with the app). Desktop lists these under "Installed Packs".
 - **Project-installed pack**: Guidance files copied into a specific project root (e.g. `manifest.json`, `AGENTS.md`, `rules/`, `skills/`). Desktop shows this under "Project Pack".
 - **Project pack source metadata**: After installing into a project, Forge writes `.forge/guidance.json` recording which downloaded pack path was used (name/version/path + timestamp + whether forceReplace was used).
+- **Phase gate bindings**: Per-project workflow validation script bindings stored at `.forge/phase-gates.json` (seeded from the selected pack defaults when missing). Desktop can edit these bindings from the Packs tab workflow panel.
 
 ### Typical Workflow (Desktop UI)
 
