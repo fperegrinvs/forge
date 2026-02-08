@@ -65,8 +65,8 @@ async function writeGuidanceSourceFile(targetRoot: string, value: ProjectGuidanc
   }
 }
 
-async function planValidate(planPath: string): Promise<ValidationResult> {
-  const fullPath = resolve(process.cwd(), planPath);
+async function planValidate(workspaceRoot: string, planPath: string): Promise<ValidationResult> {
+  const fullPath = resolve(workspaceRoot, planPath);
   if (!(await exists(fullPath))) {
     return {
       valid: false,
@@ -80,7 +80,7 @@ async function planValidate(planPath: string): Promise<ValidationResult> {
     };
   }
 
-  const controlPlane = new ForgeControlPlane(process.cwd());
+  const controlPlane = new ForgeControlPlane(workspaceRoot);
   const result = await controlPlane.planValidate(fullPath);
   const issues = (() => {
     if (!isRecord(result)) return [];
@@ -112,8 +112,8 @@ function getSpecVersion(value: unknown): string | undefined {
   return typeof specVersion === "string" ? specVersion : undefined;
 }
 
-async function planMigrate(planPath: string, write: boolean): Promise<PlanMigrationResult> {
-  const fullPath = resolve(process.cwd(), planPath);
+async function planMigrate(workspaceRoot: string, planPath: string, write: boolean): Promise<PlanMigrationResult> {
+  const fullPath = resolve(workspaceRoot, planPath);
   const value = await readJsonFile<unknown>(fullPath);
   const fromSpecVersion = getSpecVersion(value);
   const toSpecVersion = CURRENT_PLAN_SPEC_VERSION;
@@ -184,8 +184,12 @@ async function resolvePhaseGateScript(workspaceRoot: string, phase: string): Pro
   return resolve(packRoot, rel);
 }
 
-async function runWorkflowAutoStream(planPath: string, adapter: AdapterType, push: boolean): Promise<WorkflowAutoResult> {
-  const workspaceRoot = process.cwd();
+async function runWorkflowAutoStream(
+  workspaceRoot: string,
+  planPath: string,
+  adapter: AdapterType,
+  push: boolean
+): Promise<WorkflowAutoResult> {
   const planFullPath = resolve(workspaceRoot, planPath);
 
   const writeLine = (value: unknown) => {
@@ -201,8 +205,8 @@ async function runWorkflowAutoStream(planPath: string, adapter: AdapterType, pus
 
   if (adapter === "codex") {
     try {
-      const skillsDir = join(workspaceRoot, "skills");
-      const preflight = await registerCodexSkills(skillsDir, workspaceRoot);
+        const skillsDir = join(workspaceRoot, "skills");
+        const preflight = await registerCodexSkills(skillsDir, workspaceRoot);
       writeLine({
         type: "preflight.codex_skills",
         updated: preflight.updated,
@@ -279,7 +283,7 @@ async function runWorkflowAutoStream(planPath: string, adapter: AdapterType, pus
   throw new Error("workflow auto aborted: exceeded max steps");
 }
 
-async function codexSessionStream(autoSkill?: string): Promise<void> {
+async function codexSessionStream(workspaceRoot: string, autoSkill?: string): Promise<void> {
   const adapter = new CodexAppServerAdapter();
   const writeLine = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 
@@ -287,14 +291,14 @@ async function codexSessionStream(autoSkill?: string): Promise<void> {
 
   const baseRunContext = {
     taskId: "codex-session",
-    workingDirectory: process.cwd(),
+    workingDirectory: workspaceRoot,
     allowedTools: [] as string[],
     approvalMode: process.stdin.isTTY ? ("suggest" as const) : ("full-auto" as const)
   };
 
   try {
-    const skillsDir = join(process.cwd(), "skills");
-    const preflight = await registerCodexSkills(skillsDir, process.cwd());
+    const skillsDir = join(workspaceRoot, "skills");
+    const preflight = await registerCodexSkills(skillsDir, workspaceRoot);
     writeLine({
       type: "preflight.codex_skills",
       updated: preflight.updated,
@@ -350,15 +354,19 @@ async function codexSessionStream(autoSkill?: string): Promise<void> {
 }
 
 export async function runSidecarCommand(cmd: SidecarCommand): Promise<unknown> {
+  return await runSidecarCommandWithCwd(process.cwd(), cmd);
+}
+
+export async function runSidecarCommandWithCwd(workspaceRoot: string, cmd: SidecarCommand): Promise<unknown> {
   switch (cmd.command) {
     case "plan.validate": {
-      return await planValidate(cmd.params.planPath);
+      return await planValidate(workspaceRoot, cmd.params.planPath);
     }
     case "plan.migrate": {
-      return await planMigrate(cmd.params.planPath, cmd.params.write);
+      return await planMigrate(workspaceRoot, cmd.params.planPath, cmd.params.write);
     }
     case "project.init": {
-      const createdPath = await initProject(cmd.params.projectName, process.cwd());
+      const createdPath = await initProject(cmd.params.projectName, workspaceRoot);
       const guidanceResult = cmd.params.skipGuidance ? undefined : await installGuidance(createdPath);
       if (guidanceResult) {
         const bundledRoot = getBundledGuidanceRoot();
@@ -387,14 +395,14 @@ export async function runSidecarCommand(cmd: SidecarCommand): Promise<unknown> {
       };
     }
     case "guidance.installFromPack": {
-      const packRoot = resolve(process.cwd(), cmd.params.packPath);
-      const result = await installGuidanceFromPackRoot(packRoot, process.cwd(), {
+      const packRoot = resolve(workspaceRoot, cmd.params.packPath);
+      const result = await installGuidanceFromPackRoot(packRoot, workspaceRoot, {
         forceReplace: cmd.params.forceReplace
       });
 
       const manifest = await readPackManifest(packRoot);
       if (manifest) {
-        await writeGuidanceSourceFile(process.cwd(), {
+        await writeGuidanceSourceFile(workspaceRoot, {
           installedAt: new Date().toISOString(),
           pack: { ...manifest, path: packRoot },
           forceReplace: cmd.params.forceReplace
@@ -404,10 +412,10 @@ export async function runSidecarCommand(cmd: SidecarCommand): Promise<unknown> {
       return { success: true, source: packRoot, result };
     }
     case "workflow.auto.stream": {
-      return await runWorkflowAutoStream(cmd.params.planPath, cmd.params.adapter, cmd.params.push);
+      return await runWorkflowAutoStream(workspaceRoot, cmd.params.planPath, cmd.params.adapter, cmd.params.push);
     }
     case "codex.session.stream": {
-      await codexSessionStream(cmd.params.autoSkill);
+      await codexSessionStream(workspaceRoot, cmd.params.autoSkill);
       return { success: true };
     }
     default: {

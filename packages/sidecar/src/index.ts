@@ -6,4 +6,6 @@ export type SidecarCommand =
   | { command: "workflow.auto.stream"; params: { planPath: string; adapter: "codex" | "claude"; push: boolean } }
   | { command: "codex.session.stream"; params: { autoSkill?: string } };
 
+export const SIDECAR_PROTOCOL_VERSION = 1;
+
 export * from "./sidecar.js";

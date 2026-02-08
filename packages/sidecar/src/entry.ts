@@ -1,6 +1,7 @@
-import { runSidecarCommand, parseSidecarCommand, sidecarExitCode, isStreamCommand } from "./sidecar.js";
+import { runSidecarCommandWithCwd, parseSidecarCommand, sidecarExitCode, isStreamCommand } from "./sidecar.js";
+import type { SidecarCommand } from "./index.js";
 
-async function readFirstLine(): Promise<string> {
+export async function readFirstLine(): Promise<string> {
   process.stdin.setEncoding("utf8");
   let buffer = "";
 
@@ -37,7 +38,7 @@ async function readFirstLine(): Promise<string> {
   });
 }
 
-function safeJsonParse(text: string): unknown {
+export function safeJsonParse(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
   } catch {
@@ -45,26 +46,42 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-async function main(): Promise<void> {
-  const line = (await readFirstLine()).trim();
-  if (!line) {
+export async function runEntryFromValue(
+  parsed: unknown
+): Promise<{ exitCode: number; result: unknown; command: SidecarCommand["command"] }> {
+  const cmd = parseSidecarCommand(parsed);
+  const result = await runSidecarCommandWithCwd(process.cwd(), cmd);
+  const exitCode = sidecarExitCode(cmd.command, result);
+  return { exitCode, result, command: cmd.command };
+}
+
+export async function runEntryFromLine(
+  line: string
+): Promise<{ exitCode: number; result: unknown; command: SidecarCommand["command"] }> {
+  const trimmed = line.trim();
+  if (!trimmed) {
     throw new Error("sidecar: missing start command on stdin");
   }
-  const parsed = safeJsonParse(line);
+  const parsed = safeJsonParse(trimmed);
   if (!parsed) {
     throw new Error("sidecar: start command must be JSON");
   }
-
-  const cmd = parseSidecarCommand(parsed);
-  const result = await runSidecarCommand(cmd);
-  if (!isStreamCommand(cmd.command) && result !== undefined) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-  }
-  process.exitCode = sidecarExitCode(cmd.command, result);
+  return await runEntryFromValue(parsed);
 }
 
-void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 3;
-});
+export async function runEntryFromStdin(): Promise<void> {
+  const line = await readFirstLine();
+  const { exitCode, result, command } = await runEntryFromLine(line);
+  if (!isStreamCommand(command) && result !== undefined) {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  }
+  process.exitCode = exitCode;
+}
+
+if (import.meta.url === `file://${process.argv[1] ?? ""}`) {
+  void runEntryFromStdin().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 3;
+  });
+}
