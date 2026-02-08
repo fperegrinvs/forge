@@ -11,6 +11,7 @@ Track repository-level technical decisions and rationale.
 - Renamed the desktop adapter label from "claude" to "Claude Code" (internal value remains `claude`).
 - Claude adapter now runs Claude Code in non-interactive mode with explicit permissions/tool allowlist and better prompt/flag ordering; control-plane surfaces `claude --resume <id>` when a session ID is available.
 - Codex Desktop integration is now based on `codex app-server` (JSON-RPC-over-JSONL) rather than the legacy Codex CLI/PTY terminal: New Plan uses `forge codex session --jsonl` streaming over HTTP SSE, and `tool/requestUserInput` prompts are surfaced as a rich modal (options + optional free-form "Other").
+- Codex New Plan automatically starts guided plan creation by spawning `forge codex session --auto-skill plan-guided` (Desktop passes `autoSkill=plan-guided` on the session stream URL) so the user does not need to type `$plan-guided`.
 - Added a pre-push git hook to run `typecheck` before pushing (configurable via env), shipped and auto-configured via guidance pack install when `.githooks/` is present and `core.hooksPath` is unset.
 - Desktop Packs tab now supports selecting a pack name, downloading latest, selecting a downloaded version, and installing/updating/replacing the project pack; switching pack names warns about mixed state unless force replace is used.
 - Guidance packs now provide default phase gate bindings via `manifest.json` (`default_phase_gate_bindings`) and ship policy-generated shell wrappers under `scripts/phase-gates/*.sh`.
@@ -41,7 +42,7 @@ Track repository-level technical decisions and rationale.
 - `installGuidance` now registers skills as agent-native commands: `.claude/commands/<name>.md` for Claude Code (YAML frontmatter stripped) and `.agents/skills/<name>/SKILL.md` for Codex (full content preserved). This lets both agents discover Forge skills as native slash commands without manual setup.
 - Added `stripFrontmatter` helper to remove YAML frontmatter blocks from SKILL.md files, since Claude Code commands don't use frontmatter.
 - `registerSkillCommands` is idempotent — identical files are skipped via SHA-1 hash comparison, matching the existing `installGuidanceFromPackRoot` pattern.
-- NewPlanDialog instruction text is now adapter-conditional: Claude users see `/plan-guided`, Codex users see `$plan-guided`, matching each agent's native command syntax.
+- NewPlanDialog instruction text is adapter-conditional: Claude users see `/plan-guided`; Codex guided planning is auto-invoked so the UI no longer instructs the user to type `$plan-guided`.
 - NewPlanDialog instructions panel is collapsible via a chevron toggle, expanding the terminal to full dialog width when hidden.
 - NewPlanDialog is now resizable via CSS `resize: both` on the card, constrained to 90vw/90vh.
 
