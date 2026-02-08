@@ -1,0 +1,21 @@
+{
+  "name": "@forge/sidecar",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@forge/control-plane": "0.1.0",
+    "@forge/contracts": "0.1.0",
+    "@forge/guidance-pack": "0.1.0",
+    "@forge/templates": "0.1.0",
+    "@forge/adapter-codex": "0.1.0",
+    "@forge/adapter-claude": "0.1.0",
+    "@forge/shared-utils": "0.1.0"
+  }
+}

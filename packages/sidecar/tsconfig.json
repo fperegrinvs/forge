@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../shared-utils" },
+    { "path": "../contracts" },
+    { "path": "../templates" },
+    { "path": "../guidance-pack" },
+    { "path": "../check-runner" },
+    { "path": "../adapter-codex" },
+    { "path": "../adapter-claude" },
+    { "path": "../control-plane" }
+  ]
+}
