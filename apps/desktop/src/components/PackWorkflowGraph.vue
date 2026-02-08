@@ -8,8 +8,8 @@
       :elements-selectable="false"
       :zoom-on-scroll="false"
       :zoom-on-pinch="false"
-      :pan-on-drag="false"
-      fit-view
+      :pan-on-drag="true"
+      fit-view-on-init
       @node-click="onNodeClick"
     >
       <template #node-default="{ data }">
@@ -94,4 +94,3 @@ function onNodeClick(event: { node: { id: string } }): void {
   border-style: dashed;
 }
 </style>
-
