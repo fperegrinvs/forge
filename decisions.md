@@ -27,6 +27,8 @@ Track repository-level technical decisions and rationale.
 - Removed the public Forge CLI (`@forge/cli`). Forge is Desktop-only; the Desktop backend spawns an internal `@forge/sidecar` process (JSON over stdin/stdout).
 - Desktop adds a "Migrate Plan" action for legacy plan spec versions and the validator message no longer instructs running a CLI command.
 - Workflow checks no longer run via `forge workflow check`; the check implementation moved to `@forge/control-plane` and is invoked via `scripts/workflow-check.mjs`.
+- Added dedicated sidecar tests (including a full `workflow.auto.stream` run against a temporary git repo with fake Codex adapter) to restore repository coverage thresholds.
+- Added a contracts `loadPlan()` test to keep coverage stable as new runtime code is introduced.
 - Claude hook bridge runner is now import-safe (only executes when run as a script), enabling unit tests while preserving hook CLI behavior; Claude PTY adapter gained small dependency injection points for faking spawn/interfaces in tests.
 - Claude hook callback HTTP server calls `unref()` after listening so it won’t keep the process alive on its own (important for tests and short-lived CLI runs).
 - Updated the spec gate wrapper script to succeed only when tests are RED (typecheck passes and test suite fails), aligning with the code-first BDD discipline.
