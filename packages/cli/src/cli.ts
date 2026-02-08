@@ -2,7 +2,10 @@
 import { join, resolve } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import { ForgeControlPlane } from "@forge/control-plane";
+import { ForgeControlPlane, ForgeWorkflowRunner } from "@forge/control-plane";
+import { CodexAdapter } from "@forge/adapter-codex";
+import { ClaudeAdapter } from "@forge/adapter-claude";
+import { exists, readJsonFile, runCommand } from "@forge/shared-utils";
 import {
   getBundledGuidanceRoot,
   installGuidance,
@@ -422,7 +425,141 @@ export function buildCli(): Command {
       }
     });
 
+  workflow
+    .command("auto")
+    .requiredOption("--plan <path>", "plan path")
+    .option("--adapter <name>", "codex|claude", "codex")
+    .option("--max-retries <n>", "max retries per phase", "3")
+    .option("--push", "push after each completed task", true)
+    .option("--no-push", "disable pushing")
+    .option("--remote <name>", "git remote name", "origin")
+    .option("--dry-run", "do not run agents/gates/git; only simulate plan status updates", false)
+    .option("--json", "machine output")
+    .action(async (options: JsonFlag & { plan: string; adapter: AdapterName; maxRetries: string; push: boolean; remote: string; dryRun?: boolean }) => {
+      try {
+        const workspaceRoot = process.cwd();
+        const maxRetries = Number.parseInt(options.maxRetries, 10);
+        if (!Number.isFinite(maxRetries) || maxRetries < 1) {
+          throw new Error("--max-retries must be a positive integer");
+        }
+
+        const runner = new ForgeWorkflowRunner(
+	          workspaceRoot,
+	          (type) => {
+	            if (options.dryRun) {
+	              const startRun = () => Promise.resolve({ runId: "dry-run" });
+	              const streamEvents = async function* (runId: string) {
+	                // Keep the generator async to match the adapter interface contract.
+	                await Promise.resolve();
+	                yield { type: "run.started", runId, at: new Date().toISOString() } as const;
+	                yield { type: "run.completed", runId, exitCode: 0, at: new Date().toISOString() } as const;
+	              };
+	              const resume = (runId: string) => Promise.resolve({ runId });
+	              const cancel = () => Promise.resolve();
+	              return {
+	                startRun,
+	                streamEvents,
+	                resume,
+	                cancel
+	              };
+	            }
+	            return type === "codex" ? new CodexAdapter() : new ClaudeAdapter();
+	          },
+          {
+            gateRunner: async (phase: string, cwd: string) => {
+              if (options.dryRun) {
+                return { ok: true, stdout: "dry-run", stderr: "", exitCode: 0 };
+              }
+              // Phase gates are simple scripts; run via bash so executable bits are not required.
+              const scriptPath = await resolvePhaseGateScript(workspaceRoot, phase);
+              const result = await runCommand("bash", [scriptPath], cwd);
+              return { ok: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+            },
+            git: {
+              async currentBranch() {
+                if (options.dryRun) return "codex/dry-run";
+                const res = await runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+                return res.stdout.trim();
+              },
+              async commit(message: string) {
+                if (options.dryRun) return;
+                await runCommand("git", ["add", "-A"], workspaceRoot);
+                const res = await runCommand("git", ["commit", "-m", message], workspaceRoot);
+                if (res.exitCode !== 0) {
+                  throw new Error(res.stderr || res.stdout || "git commit failed");
+                }
+              },
+              async push(remote: string) {
+                if (options.dryRun) return;
+                const branchRes = await runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+                const branch = branchRes.stdout.trim();
+                const res = await runCommand("git", ["push", "-u", remote, branch], workspaceRoot);
+                if (res.exitCode !== 0) {
+                  throw new Error(res.stderr || res.stdout || "git push failed");
+                }
+              }
+            }
+          }
+        );
+
+        // Loop until plan is fully completed or the workflow pauses.
+        // Keep a hard cap to avoid infinite loops on buggy status transitions.
+        const maxSteps = 5000;
+        for (let i = 0; i < maxSteps; i += 1) {
+          const step = await runner.runAuto(resolve(options.plan), options.adapter, {
+            maxRetries,
+            push: options.push && !options.dryRun,
+            remote: options.remote
+          });
+
+          if (step.state === "running") {
+            continue;
+          }
+          output(options.json ? step : step.message, options.json);
+          return;
+        }
+
+        throw new Error("workflow auto aborted: exceeded max steps");
+      } catch (error) {
+        if (error instanceof CliExit) {
+          throw error;
+        }
+        fail(error);
+      }
+    });
+
   return program;
+}
+
+async function resolvePhaseGateScript(workspaceRoot: string, phase: string): Promise<string> {
+  const phaseGatesPath = join(workspaceRoot, ".forge", "phase-gates.json");
+
+  if (await exists(phaseGatesPath)) {
+    const parsed = await readJsonFile<Record<string, unknown>>(phaseGatesPath);
+    const phases =
+      typeof parsed.phases === "object" && parsed.phases ? (parsed.phases as Record<string, unknown>) : parsed;
+    const entry = phases[phase];
+    if (typeof entry === "string" && entry.trim()) {
+      return resolve(workspaceRoot, entry);
+    }
+  }
+
+  // Fall back to installed guidance pack defaults (from .forge/guidance.json -> manifest.json).
+  const guidancePath = join(workspaceRoot, ".forge", "guidance.json");
+  const guidance = await readJsonFile<{ pack?: { path?: string } }>(guidancePath);
+  const packRoot = guidance.pack?.path;
+  if (!packRoot) {
+    throw new Error(`Unable to resolve phase gate script for '${phase}': missing .forge/phase-gates.json and .forge/guidance.json`);
+  }
+
+  const manifest = await readJsonFile<{ default_phase_gate_bindings?: Record<string, string> }>(
+    join(packRoot, "manifest.json")
+  );
+  const rel = manifest.default_phase_gate_bindings?.[phase];
+  if (!rel) {
+    throw new Error(`Unable to resolve phase gate script for '${phase}': no binding in pack manifest`);
+  }
+  return resolve(packRoot, rel);
 }
 
 export async function runCli(argv: string[]): Promise<void> {

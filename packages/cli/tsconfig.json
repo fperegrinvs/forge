@@ -5,6 +5,8 @@
     "rootDir": "src"
   },
   "references": [
+    { "path": "../adapter-claude" },
+    { "path": "../adapter-codex" },
     { "path": "../contracts" },
     { "path": "../control-plane" },
     { "path": "../guidance-pack" },
