@@ -87,15 +87,16 @@ async function planValidate(planPath: string): Promise<ValidationResult> {
     const raw = result.issues;
     if (!Array.isArray(raw)) return [];
     return raw
-      .map((item) => {
+      .map((item): ValidationIssue | undefined => {
         if (!isRecord(item)) return undefined;
         const path = typeof item.path === "string" ? item.path : undefined;
         const message = typeof item.message === "string" ? item.message : undefined;
-        const code = typeof item.code === "string" ? item.code : undefined;
+        // Widen from potential string-literal unions to plain string for the sidecar surface.
+        const code: string | undefined = typeof item.code === "string" ? item.code : undefined;
         if (!path || !message || !code) return undefined;
-        return { path, message, code } satisfies ValidationIssue;
+        return { path, message, code };
       })
-      .filter((x): x is ValidationIssue => Boolean(x));
+      .filter((x): x is ValidationIssue => x !== undefined);
   })();
   return {
     valid: isRecord(result) && typeof result.valid === "boolean" ? result.valid : false,

@@ -19,6 +19,7 @@ use tauri::AppHandle;
 use tauri::Manager;
 use tower_http::services::ServeDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::ChildStdin;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
@@ -130,6 +131,15 @@ pub fn port() -> u16 {
 
 fn api_error(status: StatusCode, message: impl Into<String>) -> (StatusCode, String) {
     (status, message.into())
+}
+
+async fn write_start_command(stdin: &mut ChildStdin, start: &str) {
+    let mut bytes = start.as_bytes().to_vec();
+    if !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    let _ = stdin.write_all(&bytes).await;
+    let _ = stdin.flush().await;
 }
 
 #[derive(Deserialize)]
@@ -317,13 +327,7 @@ async fn workflow_auto_stream(
                 return;
             }
         };
-        // Write the initial sidecar command.
-        let mut bytes = start.into_bytes();
-        if !bytes.ends_with(b"\n") {
-            bytes.push(b'\n');
-        }
-        let _ = stdin.write_all(&bytes).await;
-        let _ = stdin.flush().await;
+        write_start_command(&mut stdin, &start).await;
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -539,13 +543,7 @@ async fn codex_session_stream(
                 return;
             }
         };
-        // Write the initial sidecar command.
-        let mut bytes = start.into_bytes();
-        if !bytes.ends_with(b"\n") {
-            bytes.push(b'\n');
-        }
-        let _ = stdin.write_all(&bytes).await;
-        let _ = stdin.flush().await;
+        write_start_command(&mut stdin, &start).await;
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
