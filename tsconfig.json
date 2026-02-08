@@ -9,7 +9,6 @@
     { "path": "packages/adapter-codex" },
     { "path": "packages/adapter-claude" },
     { "path": "packages/control-plane" },
-    { "path": "packages/cli" },
     { "path": "packages/sidecar" },
     { "path": "apps/desktop" }
   ]

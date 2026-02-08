@@ -55,24 +55,6 @@
         "@forge/shared-utils": "0.1.0",
       },
     },
-    "packages/cli": {
-      "name": "@forge/cli",
-      "version": "0.1.0",
-      "bin": {
-        "forge": "dist/bin.js",
-      },
-      "dependencies": {
-        "@forge/adapter-claude": "0.1.0",
-        "@forge/adapter-codex": "0.1.0",
-        "@forge/check-runner": "0.1.0",
-        "@forge/contracts": "0.1.0",
-        "@forge/control-plane": "0.1.0",
-        "@forge/guidance-pack": "0.1.0",
-        "@forge/shared-utils": "0.1.0",
-        "@forge/templates": "0.1.0",
-        "commander": "^13.1.0",
-      },
-    },
     "packages/contracts": {
       "name": "@forge/contracts",
       "version": "0.1.0",
@@ -89,6 +71,7 @@
         "@forge/adapter-codex": "0.1.0",
         "@forge/check-runner": "0.1.0",
         "@forge/contracts": "0.1.0",
+        "@forge/guidance-pack": "0.1.0",
         "@forge/shared-utils": "0.1.0",
       },
     },
@@ -102,6 +85,19 @@
     "packages/shared-utils": {
       "name": "@forge/shared-utils",
       "version": "0.1.0",
+    },
+    "packages/sidecar": {
+      "name": "@forge/sidecar",
+      "version": "0.1.0",
+      "dependencies": {
+        "@forge/adapter-claude": "0.1.0",
+        "@forge/adapter-codex": "0.1.0",
+        "@forge/contracts": "0.1.0",
+        "@forge/control-plane": "0.1.0",
+        "@forge/guidance-pack": "0.1.0",
+        "@forge/shared-utils": "0.1.0",
+        "@forge/templates": "0.1.0",
+      },
     },
     "packages/templates": {
       "name": "@forge/templates",
@@ -200,8 +196,6 @@
 
     "@forge/check-runner": ["@forge/check-runner@workspace:packages/check-runner"],
 
-    "@forge/cli": ["@forge/cli@workspace:packages/cli"],
-
     "@forge/contracts": ["@forge/contracts@workspace:packages/contracts"],
 
     "@forge/control-plane": ["@forge/control-plane@workspace:packages/control-plane"],
@@ -211,6 +205,8 @@
     "@forge/guidance-pack": ["@forge/guidance-pack@workspace:packages/guidance-pack"],
 
     "@forge/shared-utils": ["@forge/shared-utils@workspace:packages/shared-utils"],
+
+    "@forge/sidecar": ["@forge/sidecar@workspace:packages/sidecar"],
 
     "@forge/templates": ["@forge/templates@workspace:packages/templates"],
 
@@ -431,8 +427,6 @@
     "color-convert": ["color-convert@2.0.1", "", { "dependencies": { "color-name": "~1.1.4" } }, "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ=="],
 
     "color-name": ["color-name@1.1.4", "", {}, "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA=="],
-
-    "commander": ["commander@13.1.0", "", {}, "sha512-/rFeCpNJQbhSZjGVwO9RFV3xPqbnERS8MmIQzCtD/zl6gpJuV/bMLuN92oG3F7d8oDEHHRrujSXNUr8fpjntKw=="],
 
     "concat-map": ["concat-map@0.0.1", "", {}, "sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg=="],
 

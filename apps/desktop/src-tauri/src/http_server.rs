@@ -22,7 +22,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
-use crate::forge_cli::{run_forge_json, spawn_forge_stream_with_env};
+use crate::forge_sidecar::{run_sidecar_json, spawn_sidecar_stream_with_env};
 use crate::packs::{
     compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs,
     read_bundled_packs, read_installed_packs, read_pack_content, PackContent,
@@ -139,6 +139,15 @@ struct PlanValidateRequest {
     plan_path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanMigrateRequest {
+    project_root: String,
+    plan_path: String,
+    #[serde(default)]
+    write: bool,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ValidationIssue {
@@ -161,15 +170,13 @@ async fn plan_validate(
     let app = state.app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let cwd = PathBuf::from(body.project_root);
-        let args = vec![
-            "plan".to_string(),
-            "validate".to_string(),
-            "--file".to_string(),
-            body.plan_path,
-            "--json".to_string(),
-        ];
-
-        let value = run_forge_json(&app, &cwd, &args)?;
+        let request = serde_json::json!({
+            "command": "plan.validate",
+            "params": {
+                "planPath": body.plan_path
+            }
+        });
+        let value = run_sidecar_json(&app, &cwd, &request)?;
         let valid = value.get("valid").and_then(|v| v.as_bool()).unwrap_or(false);
         let issues = value
             .get("issues")
@@ -189,6 +196,28 @@ async fn plan_validate(
             .unwrap_or_default();
 
         Ok::<_, String>(ValidationResult { valid, issues })
+    })
+    .await
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
+    .map(Json)
+    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+}
+
+async fn plan_migrate(
+    State(state): State<ServerState>,
+    Json(body): Json<PlanMigrateRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let app = state.app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let cwd = PathBuf::from(body.project_root);
+        let request = serde_json::json!({
+            "command": "plan.migrate",
+            "params": {
+                "planPath": body.plan_path,
+                "write": body.write
+            }
+        });
+        run_sidecar_json(&app, &cwd, &request)
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -237,23 +266,20 @@ async fn workflow_auto_stream(
             .await;
 
         let cwd = PathBuf::from(&query.project_root);
-        let mut args = vec![
-            "workflow".to_string(),
-            "auto".to_string(),
-            "--plan".to_string(),
-            query.plan_path,
-            "--adapter".to_string(),
-            query.adapter,
-            "--jsonl".to_string(),
-        ];
-        if query.push == Some(false) {
-            args.push("--no-push".to_string());
-        }
+        let push_enabled = query.push != Some(false);
+        let start = serde_json::json!({
+            "command": "workflow.auto.stream",
+            "params": {
+                "planPath": query.plan_path,
+                "adapter": query.adapter,
+                "push": push_enabled
+            }
+        })
+        .to_string();
 
-        let mut child = match spawn_forge_stream_with_env(
+        let mut child = match spawn_sidecar_stream_with_env(
             &app,
             &cwd,
-            &args,
             &[
                 ("FORGE_INTERACTIVE", "1"),
                 ("FORGE_DESKTOP", "1"),
@@ -291,6 +317,13 @@ async fn workflow_auto_stream(
                 return;
             }
         };
+        // Write the initial sidecar command.
+        let mut bytes = start.into_bytes();
+        if !bytes.ends_with(b"\n") {
+            bytes.push(b'\n');
+        }
+        let _ = stdin.write_all(&bytes).await;
+        let _ = stdin.flush().await;
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -458,23 +491,17 @@ async fn codex_session_stream(
             .await;
 
         let cwd = PathBuf::from(&query.project_root);
-        let mut args = vec![
-            "codex".to_string(),
-            "session".to_string(),
-            "--jsonl".to_string(),
-        ];
-
-        if let Some(skill) = query.auto_skill.as_ref().map(|s| s.trim().to_string()) {
-            if !skill.is_empty() {
-                args.push("--auto-skill".to_string());
-                args.push(skill);
+        let start = serde_json::json!({
+            "command": "codex.session.stream",
+            "params": {
+                "autoSkill": query.auto_skill.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty())
             }
-        }
+        })
+        .to_string();
 
-        let mut child = match spawn_forge_stream_with_env(
+        let mut child = match spawn_sidecar_stream_with_env(
             &app,
             &cwd,
-            &args,
             &[
                 ("FORGE_INTERACTIVE", "1"),
                 ("FORGE_DESKTOP", "1"),
@@ -512,6 +539,13 @@ async fn codex_session_stream(
                 return;
             }
         };
+        // Write the initial sidecar command.
+        let mut bytes = start.into_bytes();
+        if !bytes.ends_with(b"\n") {
+            bytes.push(b'\n');
+        }
+        let _ = stdin.write_all(&bytes).await;
+        let _ = stdin.flush().await;
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -1001,18 +1035,14 @@ async fn project_install_guidance(
     let app = state.app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let cwd = PathBuf::from(body.project_root);
-        let mut args = vec![
-            "install-guidance".to_string(),
-            "--source".to_string(),
-            "path".to_string(),
-            "--path".to_string(),
-            body.pack_path,
-            "--json".to_string(),
-        ];
-        if body.force_replace {
-            args.push("--force-replace".to_string());
-        }
-        run_forge_json(&app, &cwd, &args)
+        let request = serde_json::json!({
+            "command": "guidance.installFromPack",
+            "params": {
+                "packPath": body.pack_path,
+                "forceReplace": body.force_replace
+            }
+        });
+        run_sidecar_json(&app, &cwd, &request)
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
@@ -1062,20 +1092,16 @@ async fn project_init(
     tauri::async_runtime::spawn_blocking(move || {
         let project_root = PathBuf::from(&body.parent_dir).join(&body.project_name);
         let cwd = PathBuf::from(&body.parent_dir);
-        let mut args = vec![
-            "init".to_string(),
-            body.project_name.clone(),
-            "--json".to_string(),
-        ];
-        if let Some(ref template) = body.template {
-            args.push("--template".to_string());
-            args.push(template.clone());
-        }
-        if body.skip_guidance {
-            args.push("--skip-guidance".to_string());
-        }
+        let request = serde_json::json!({
+            "command": "project.init",
+            "params": {
+                "projectName": body.project_name,
+                "template": body.template,
+                "skipGuidance": body.skip_guidance
+            }
+        });
 
-        match run_forge_json(&app, &cwd, &args) {
+        match run_sidecar_json(&app, &cwd, &request) {
             Ok(_) => Ok::<_, String>(ProjectInitResult {
                 success: true,
                 project_root: Some(project_root.to_string_lossy().to_string()),
@@ -1634,6 +1660,7 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         .route("/api/cwd", get(get_cwd))
         .route("/api/debug/status", get(debug_status))
         .route("/api/plan/validate", post(plan_validate))
+        .route("/api/plan/migrate", post(plan_migrate))
         .route("/api/workflow/auto/stream", get(workflow_auto_stream))
         .route("/api/workflow/auto/prompt/respond", post(workflow_auto_prompt_respond))
         .route("/api/workflow/auto/cancel", post(workflow_auto_stream_cancel))

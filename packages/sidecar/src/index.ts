@@ -6,4 +6,4 @@ export type SidecarCommand =
   | { command: "workflow.auto.stream"; params: { planPath: string; adapter: "codex" | "claude"; push: boolean } }
   | { command: "codex.session.stream"; params: { autoSkill?: string } };
 
-// Implementation lives in src/sidecar.ts; this is just the public type surface.
+export * from "./sidecar.js";

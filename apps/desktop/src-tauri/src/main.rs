@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(warnings)]
 
-mod forge_cli;
+mod forge_sidecar;
 mod packs;
 mod phase_gates;
 mod http_server;
@@ -14,7 +14,7 @@ use std::time::Duration;
 use tauri::Manager;
 use tauri::WebviewWindowBuilder;
 
-use crate::forge_cli::run_forge_json;
+use crate::forge_sidecar::run_sidecar_json;
 use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, read_installed_packs};
 
 #[derive(Serialize, Deserialize)]
@@ -39,17 +39,15 @@ async fn plan_validate(
     plan_path: String
 ) -> Result<ValidationResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        // Delegate to the Forge CLI sidecar for real validation (schema + graph + workflow).
         let cwd = PathBuf::from(project_root);
-        let args = vec![
-            "plan".to_string(),
-            "validate".to_string(),
-            "--file".to_string(),
-            plan_path,
-            "--json".to_string(),
-        ];
+        let request = serde_json::json!({
+            "command": "plan.validate",
+            "params": {
+                "planPath": plan_path
+            }
+        });
 
-        let value = run_forge_json(&app, &cwd, &args)?;
+        let value = run_sidecar_json(&app, &cwd, &request)?;
         let valid = value.get("valid").and_then(|v| v.as_bool()).unwrap_or(false);
         let issues = value
             .get("issues")
@@ -216,18 +214,14 @@ async fn project_install_guidance(
 ) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cwd = PathBuf::from(project_root);
-        let mut args = vec![
-            "install-guidance".to_string(),
-            "--source".to_string(),
-            "path".to_string(),
-            "--path".to_string(),
-            pack_path,
-            "--json".to_string(),
-        ];
-        if force_replace {
-            args.push("--force-replace".to_string());
-        }
-        run_forge_json(&app, &cwd, &args)
+        let request = serde_json::json!({
+            "command": "guidance.installFromPack",
+            "params": {
+                "packPath": pack_path,
+                "forceReplace": force_replace
+            }
+        });
+        run_sidecar_json(&app, &cwd, &request)
     })
     .await
     .map_err(|error| format!("project_install_guidance join failed: {error:?}"))?

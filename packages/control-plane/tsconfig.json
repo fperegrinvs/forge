@@ -9,6 +9,7 @@
     { "path": "../check-runner" },
     { "path": "../adapter-codex" },
     { "path": "../adapter-claude" },
+    { "path": "../guidance-pack" },
     { "path": "../shared-utils" }
   ],
   "include": ["src/**/*.ts"],

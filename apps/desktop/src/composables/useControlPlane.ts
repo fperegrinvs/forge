@@ -24,6 +24,14 @@ export type ValidateResult = {
   issues: ValidationIssue[];
 };
 
+export type PlanMigrateResult = {
+  migrated: boolean;
+  wrote: boolean;
+  filePath: string;
+  fromSpecVersion?: string;
+  toSpecVersion: string;
+};
+
 export type RunNextResult = {
   state: string;
   taskId?: string;
@@ -90,6 +98,13 @@ export async function planValidate(projectRoot: string, planPath: string): Promi
   return await apiJson<ValidateResult>("/api/plan/validate", {
     method: "POST",
     body: JSON.stringify({ projectRoot, planPath })
+  });
+}
+
+export async function planMigrate(projectRoot: string, planPath: string, write = true): Promise<PlanMigrateResult> {
+  return await apiJson<PlanMigrateResult>("/api/plan/migrate", {
+    method: "POST",
+    body: JSON.stringify({ projectRoot, planPath, write })
   });
 }
 
