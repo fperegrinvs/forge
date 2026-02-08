@@ -264,14 +264,33 @@
 
                   <div v-else class="mb-3">
                     <div class="text-body-2 mb-2">
-                      Click a phase to bind a validation script for this project.
+                      Phases are shown in order. Select one to bind a validation script for this project.
                     </div>
-                    <PackWorkflowGraph
-                      :phases="selectedPackContent.phases"
-                      :bindings="phaseGateBindings"
-                      :default-phase-gate-bindings="selectedPackContent.defaultPhaseGateBindings"
-                      @phase-click="onPhaseClick"
-                    />
+                    <v-list density="compact" class="workflow-list">
+                      <v-list-item
+                        v-for="item in phaseItems"
+                        :key="item.id"
+                        :active="item.id === selectedPhaseId"
+                        @click="selectedPhaseId = item.id"
+                      >
+                        <template #title>
+                          <div class="d-flex align-center ga-2">
+                            <strong>{{ item.id }}</strong>
+                            <v-chip
+                              size="x-small"
+                              :color="item.status === 'custom' ? 'success' : item.status === 'default' ? 'primary' : item.status === 'disabled' ? 'grey' : 'grey'"
+                              variant="tonal"
+                            >
+                              {{ item.status }}
+                            </v-chip>
+                            <v-chip v-if="item.diagnostic" size="x-small" color="warning" variant="tonal">diagnostic</v-chip>
+                          </div>
+                        </template>
+                        <template #subtitle>
+                          <span>gate: {{ item.gate }}</span>
+                        </template>
+                      </v-list-item>
+                    </v-list>
                   </div>
 
                   <v-alert v-if="phaseGateError" type="error" variant="tonal" class="mb-3">
@@ -333,7 +352,6 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import CreateProjectDialog from "./components/CreateProjectDialog.vue";
 import NewPlanDialog from "./components/NewPlanDialog.vue";
 import LiveOutputPane from "./components/LiveOutputPane.vue";
-import PackWorkflowGraph from "./components/PackWorkflowGraph.vue";
 import { mergeDiscoveredPlans } from "./lib/mergeDiscoveredPlans.js";
 import {
   getCwd,
@@ -364,6 +382,19 @@ import {
   type TaskStatus,
   type ValidationIssue
 } from "./composables/useControlPlane";
+
+function computePhaseBindingStatus(
+  phaseId: string,
+  bindings: PhaseGateBindings,
+  defaults: Record<string, string>
+): "custom" | "default" | "disabled" | "unbound" {
+  const bound = bindings[phaseId];
+  if (bound === null) return "disabled";
+  if (typeof bound === "string") {
+    return defaults[phaseId] && bound === defaults[phaseId] ? "default" : "custom";
+  }
+  return "unbound";
+}
 
 const tab = ref<"orchestrate" | "packs">("orchestrate");
 const showCreateProject = ref(false);
@@ -398,6 +429,18 @@ const phaseGateBusy = ref(false);
 const selectedPhase = computed(() => {
   const phases = selectedPackContent.value?.phases ?? [];
   return phases.find((p) => p.id === selectedPhaseId.value);
+});
+
+const phaseItems = computed(() => {
+  const content = selectedPackContent.value;
+  if (!content) return [];
+  const defaults = content.defaultPhaseGateBindings ?? {};
+  return content.phases.map((p) => ({
+    id: p.id,
+    gate: p.gate,
+    diagnostic: p.diagnostic,
+    status: computePhaseBindingStatus(p.id, phaseGateBindings.value, defaults)
+  }));
 });
 
 const selectedPhaseDefaultScript = computed(() => {
@@ -1126,14 +1169,18 @@ async function onDisableSelectedPhase(): Promise<void> {
   await savePhaseGateBinding(phaseId, null);
 }
 
-async function onPhaseClick(phaseId: string): Promise<void> {
-  selectedPhaseId.value = phaseId;
-  await onBindSelectedPhase();
-}
-
 function onSelectInstalledPack(pack: InstalledPack): void {
   selectedPackName.value = pack.name;
   selectedPackPath.value = pack.path;
   void loadSelectedPackDetails();
 }
 </script>
+
+<style scoped>
+.workflow-list {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.015);
+}
+</style>
