@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { exists, listFilesRecursive } from "@forge/shared-utils";
 import type { InstallGuidanceOptions, InstallGuidanceResult, RegisteredCommands, SkillDescriptor } from "./types.js";
 
@@ -130,6 +131,7 @@ export async function installGuidanceFromPackRoot(
   targetRoot: string,
   options: InstallGuidanceOptions = {}
 ): Promise<InstallGuidanceResult> {
+  const installGitHooks = options.installGitHooks ?? true;
   const sourceFiles = await listFilesRecursive(packRoot);
   const result: InstallGuidanceResult = {
     installed: [],
@@ -176,6 +178,36 @@ export async function installGuidanceFromPackRoot(
   }
   for (const name of registered.codex) {
     result.installed.push(join(".agents", "skills", name, "SKILL.md"));
+  }
+
+  if (installGitHooks) {
+    try {
+      const gitDir = join(targetRoot, ".git");
+      const hooksDir = join(targetRoot, ".githooks");
+
+      // Only configure hooks for real git repos that have hooks installed.
+      if (existsSync(gitDir) && existsSync(hooksDir)) {
+        const current = spawnSync("git", ["config", "--get", "core.hooksPath"], {
+          cwd: targetRoot,
+          encoding: "utf8"
+        });
+        const currentValue = current.status === 0 ? String(current.stdout || "").trim() : "";
+
+        // Don't override custom hook paths; only set when unset or already pointing at .githooks.
+        if (!currentValue || currentValue === ".githooks") {
+          const set = spawnSync("git", ["config", "core.hooksPath", ".githooks"], {
+            cwd: targetRoot,
+            encoding: "utf8"
+          });
+          if (set.status === 0 && !currentValue) {
+            // Surface in output so callers can tell it happened.
+            result.installed.push(".githooks (core.hooksPath configured)");
+          }
+        }
+      }
+    } catch {
+      // best-effort: guidance should still install even if git isn't available
+    }
   }
 
   return result;
