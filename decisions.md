@@ -2,6 +2,15 @@
 
 Track repository-level technical decisions and rationale.
 
+## 2026-02-08 (desktop UX, Claude Code runs, and pre-push gates)
+- Desktop now persists the last selected project root (localStorage) so users don't have to re-browse on restart.
+- Folder pickers no longer open twice when clicking "Browse" (stop click propagation on the append button).
+- Discovered plans are ordered newest-first (by file mtime descending) to surface the most likely plan.
+- Removed the explicit "Validate Plan" button; validation happens automatically in the background and "Run" blocks when invalid.
+- Renamed the desktop adapter label from "claude" to "Claude Code" (internal value remains `claude`).
+- Claude adapter now runs Claude Code in non-interactive mode with explicit permissions/tool allowlist and better prompt/flag ordering; control-plane surfaces `claude --resume <id>` when a session ID is available.
+- Added a pre-push git hook to run `typecheck` before pushing (configurable via env), shipped and auto-configured via guidance pack install when `.githooks/` is present and `core.hooksPath` is unset.
+
 ## 2026-02-07 (unified Run action & schema improvements)
 - Unified "Run Next" and "Resume" into a single "Run" action: `runNext()` now auto-resumes paused state (sets task from "paused" to "pending", clears `pausedRun`) instead of returning early, eliminating the need for a separate resume step.
 - Removed the redundant `pausedRunId` field from `RuntimeState` (was always a copy of `pausedRun.runId`); kept a read-time migration in `loadState()` for existing state files.
