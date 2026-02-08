@@ -80,6 +80,8 @@ class ClaudeHookServer {
     if (!this.listening) {
       this.listening = new Promise((resolve) => {
         this.server.listen(0, "127.0.0.1", () => {
+          // Don't keep the process alive solely because the hook server is listening.
+          this.server.unref();
           const addr = this.server.address();
           if (addr && typeof addr === "object") {
             resolve(`http://127.0.0.1:${String(addr.port)}/hook`);
@@ -115,12 +117,34 @@ type TaskSession = {
   externalRunId?: string;
 };
 
+export type ClaudePtyAdapterOptions = {
+  command?: string;
+  scriptCommand?: string;
+  spawnImpl?: typeof spawn;
+  createInterfaceImpl?: typeof createInterface;
+  writeJsonImpl?: (path: string, value: unknown) => Promise<void>;
+  hookServer?: ClaudeHookServer;
+};
+
 export class ClaudePtyAdapter implements AgentAdapter {
   private readonly runs = new Map<string, RunState>();
   private readonly sessionsByTask = new Map<string, TaskSession>();
-  private readonly hookServer = new ClaudeHookServer();
+  private readonly hookServer: ClaudeHookServer;
+  private readonly spawnImpl: typeof spawn;
+  private readonly createInterfaceImpl: typeof createInterface;
+  private readonly writeJsonImpl: (path: string, value: unknown) => Promise<void>;
+  private readonly scriptCommand: string;
+  private readonly command: string;
 
-  constructor(private readonly command = "claude") {}
+  constructor(commandOrOptions: string | ClaudePtyAdapterOptions = "claude", maybeOptions: ClaudePtyAdapterOptions = {}) {
+    const options = typeof commandOrOptions === "string" ? { ...maybeOptions, command: commandOrOptions } : commandOrOptions;
+    this.command = options.command ?? "claude";
+    this.scriptCommand = options.scriptCommand ?? "/usr/bin/script";
+    this.spawnImpl = options.spawnImpl ?? spawn;
+    this.createInterfaceImpl = options.createInterfaceImpl ?? createInterface;
+    this.writeJsonImpl = options.writeJsonImpl ?? writeJson;
+    this.hookServer = options.hookServer ?? new ClaudeHookServer();
+  }
 
   startRun(context: RunContext): Promise<RunHandle> {
     const runId = randomUUID();
@@ -155,8 +179,8 @@ export class ClaudePtyAdapter implements AgentAdapter {
 
     // Stream PTY output to the caller.
     const queue = new AsyncQueue<string>();
-    const stdoutRl = createInterface({ input: session.child.stdout });
-    const stderrRl = createInterface({ input: session.child.stderr });
+    const stdoutRl = this.createInterfaceImpl({ input: session.child.stdout });
+    const stderrRl = this.createInterfaceImpl({ input: session.child.stderr });
     stdoutRl.on("line", (line) => {
       queue.push(`${line}\n`);
     });
@@ -201,7 +225,7 @@ export class ClaudePtyAdapter implements AgentAdapter {
     const settingsPath = join(context.workingDirectory, ".forge", "claude-hooks", `${context.taskId}.settings.json`);
     const hookRunnerPath = fileURLToPath(new URL("./hook-bridge-runner.js", import.meta.url));
 
-    await writeJson(settingsPath, {
+    await this.writeJsonImpl(settingsPath, {
       hooks: {
         Stop: [
           {
@@ -219,7 +243,7 @@ export class ClaudePtyAdapter implements AgentAdapter {
     });
 
     // Use /usr/bin/script to allocate a PTY-like environment while keeping stdin/out pipeable.
-    const child = spawn("/usr/bin/script", ["-q", "/dev/null", this.command, "--settings", settingsPath], {
+    const child = this.spawnImpl(this.scriptCommand, ["-q", "/dev/null", this.command, "--settings", settingsPath], {
       cwd: context.workingDirectory,
       env: {
         ...process.env,

@@ -20,6 +20,8 @@ Track repository-level technical decisions and rationale.
 - `forge run next --adapter codex` now performs a lightweight preflight to sync `skills/*/SKILL.md` into `.agents/skills/*/SKILL.md` so Codex-native skill discovery stays consistent.
 - Added `forge workflow auto --plan <path>`: a Ralph-loop style runner that advances tasks through spec→implement→refactor→document→commit, runs phase gate scripts, commits after each successful phase, and updates `tasks[].status` in the plan file.
 - Workflow auto uses `codex app-server` (JSON-RPC-over-JSONL) for Codex runs and an interactive Claude Code session wrapped via `/usr/bin/script` + hooks for lifecycle signaling.
+- Claude hook bridge runner is now import-safe (only executes when run as a script), enabling unit tests while preserving hook CLI behavior; Claude PTY adapter gained small dependency injection points for faking spawn/interfaces in tests.
+- Claude hook callback HTTP server calls `unref()` after listening so it won’t keep the process alive on its own (important for tests and short-lived CLI runs).
 - Updated the spec gate wrapper script to succeed only when tests are RED (typecheck passes and test suite fails), aligning with the code-first BDD discipline.
 
 ## 2026-02-07 (unified Run action & schema improvements)
