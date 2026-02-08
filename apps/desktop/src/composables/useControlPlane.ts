@@ -131,6 +131,8 @@ export async function getEvidence(projectRoot: string, taskId: string): Promise<
 export function codexSessionStreamUrl(projectRoot: string): string {
   const url = new URL("/api/codex/session/stream", window.location.origin);
   url.searchParams.set("projectRoot", projectRoot);
+  // Desktop New Plan (Codex) should start guided planning automatically.
+  url.searchParams.set("autoSkill", "plan-guided");
   return url.toString();
 }
 

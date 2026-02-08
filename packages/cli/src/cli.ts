@@ -612,12 +612,44 @@ export function buildCli(): Command {
   codex
     .command("session")
     .option("--jsonl", "stream JSONL events to stdout", true)
-    .action(async () => {
+    .option("--auto-skill <name>", "auto-run a Codex skill invocation before reading stdin")
+    .action(async (options: { jsonl?: boolean; autoSkill?: string }) => {
       try {
         const adapter = new CodexAppServerAdapter();
         const writeLine = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 
         writeLine({ type: "codex.session.started", at: new Date().toISOString() });
+
+        try {
+          const skillsDir = join(process.cwd(), "skills");
+          const preflight = await registerCodexSkills(skillsDir, process.cwd());
+          writeLine({
+            type: "preflight.codex_skills",
+            updated: preflight.updated,
+            at: new Date().toISOString()
+          });
+        } catch (error) {
+          writeLine({
+            type: "preflight.codex_skills.error",
+            message: String(error),
+            at: new Date().toISOString()
+          });
+        }
+
+        if (typeof options.autoSkill === "string" && options.autoSkill.trim()) {
+          const skillInvocation = `$${options.autoSkill.trim()}`;
+          const handle = await adapter.startRun({
+            taskId: "codex-session",
+            prompt: skillInvocation,
+            workingDirectory: process.cwd(),
+            allowedTools: [],
+            approvalMode: process.stdin.isTTY ? "suggest" : "full-auto"
+          });
+
+          for await (const event of adapter.streamEvents(handle.runId)) {
+            writeLine({ type: "adapter.event", event });
+          }
+        }
 
         const rl = createInterface({ input: process.stdin });
         for await (const line of rl) {

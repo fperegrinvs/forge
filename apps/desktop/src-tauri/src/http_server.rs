@@ -423,6 +423,7 @@ async fn workflow_auto_stream(
 #[serde(rename_all = "camelCase")]
 struct CodexSessionStreamQuery {
     project_root: String,
+    auto_skill: Option<String>,
 }
 
 async fn codex_session_stream(
@@ -457,11 +458,18 @@ async fn codex_session_stream(
             .await;
 
         let cwd = PathBuf::from(&query.project_root);
-        let args = vec![
+        let mut args = vec![
             "codex".to_string(),
             "session".to_string(),
             "--jsonl".to_string(),
         ];
+
+        if let Some(skill) = query.auto_skill.as_ref().map(|s| s.trim().to_string()) {
+            if !skill.is_empty() {
+                args.push("--auto-skill".to_string());
+                args.push(skill);
+            }
+        }
 
         let mut child = match spawn_forge_stream_with_env(
             &app,
