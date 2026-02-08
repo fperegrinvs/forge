@@ -10,7 +10,7 @@ Track repository-level technical decisions and rationale.
 - New Plan guided flow now detects and surfaces both newly created and updated plan files using `modifiedMs` from `/api/plans/list`.
 - Renamed the desktop adapter label from "claude" to "Claude Code" (internal value remains `claude`).
 - Claude adapter now runs Claude Code in non-interactive mode with explicit permissions/tool allowlist and better prompt/flag ordering; control-plane surfaces `claude --resume <id>` when a session ID is available.
-- Stabilized the Codex terminal used by New Plan: keep PTY master alive across WS reconnects, buffer initial output until WS attach, and (macOS only) wrap `codex` in `/usr/bin/script` to avoid Codex aborting on stdout writes; also improved WS error reporting and focus.
+- Codex Desktop integration is now based on `codex app-server` (JSON-RPC-over-JSONL) rather than the legacy Codex CLI/PTY terminal: New Plan uses `forge codex session --jsonl` streaming over HTTP SSE, and `tool/requestUserInput` prompts are surfaced as a rich modal (options + optional free-form "Other").
 - Added a pre-push git hook to run `typecheck` before pushing (configurable via env), shipped and auto-configured via guidance pack install when `.githooks/` is present and `core.hooksPath` is unset.
 - Desktop Packs tab now supports selecting a pack name, downloading latest, selecting a downloaded version, and installing/updating/replacing the project pack; switching pack names warns about mixed state unless force replace is used.
 - Guidance packs now provide default phase gate bindings via `manifest.json` (`default_phase_gate_bindings`) and ship policy-generated shell wrappers under `scripts/phase-gates/*.sh`.

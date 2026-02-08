@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { join, resolve } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { Command } from "commander";
 import { ForgeControlPlane, ForgeWorkflowRunner, renderWorkflowProgress } from "@forge/control-plane";
 import { CodexAppServerAdapter } from "@forge/adapter-codex";
@@ -435,7 +436,8 @@ export function buildCli(): Command {
     .option("--remote <name>", "git remote name", "origin")
     .option("--dry-run", "do not run agents/gates/git; only simulate plan status updates", false)
     .option("--json", "machine output")
-    .action(async (options: JsonFlag & { plan: string; adapter: AdapterName; maxRetries: string; push: boolean; remote: string; dryRun?: boolean }) => {
+    .option("--jsonl", "stream JSONL events to stdout", false)
+    .action(async (options: JsonFlag & { jsonl?: boolean; plan: string; adapter: AdapterName; maxRetries: string; push: boolean; remote: string; dryRun?: boolean }) => {
       try {
         const workspaceRoot = process.cwd();
         const planPath = resolve(options.plan);
@@ -443,6 +445,10 @@ export function buildCli(): Command {
         if (!Number.isFinite(maxRetries) || maxRetries < 1) {
           throw new Error("--max-retries must be a positive integer");
         }
+
+        const writeLine = (value: unknown) => {
+          process.stdout.write(`${JSON.stringify(value)}\n`);
+        };
 
         const codexAdapter = options.dryRun ? null : new CodexAppServerAdapter();
         const claudeAdapter = options.dryRun ? null : new ClaudePtyAdapter();
@@ -476,10 +482,12 @@ export function buildCli(): Command {
           },
           {
             onAdapterEvent: (event) => {
-              if (options.json || options.dryRun) return;
-              if (event.type === "run.output") {
-                process.stderr.write(event.chunk);
+              if (options.jsonl) {
+                writeLine({ type: "adapter.event", event });
+                return;
               }
+              if (options.json || options.dryRun) return;
+              if (event.type === "run.output") process.stderr.write(event.chunk);
             },
             gateRunner: async (phase: string, cwd: string) => {
               if (options.dryRun) {
@@ -517,6 +525,15 @@ export function buildCli(): Command {
           }
         );
 
+        if (options.jsonl) {
+          writeLine({
+            type: "workflow.auto.started",
+            plan: planPath,
+            adapter: options.adapter,
+            at: new Date().toISOString()
+          });
+        }
+
         // Loop until plan is fully completed or the workflow pauses.
         // Keep a hard cap to avoid infinite loops on buggy status transitions.
         const maxSteps = 5000;
@@ -528,6 +545,10 @@ export function buildCli(): Command {
           });
 
           if (step.state === "running") {
+            if (options.jsonl) {
+              writeLine({ type: "workflow.auto.step", taskId: step.taskId, phase: step.phase, at: new Date().toISOString() });
+              continue;
+            }
             if (!options.json && !options.dryRun) {
               try {
                 const raw = await readFile(planPath, "utf8");
@@ -548,6 +569,11 @@ export function buildCli(): Command {
               }
             }
             continue;
+          }
+
+          if (options.jsonl) {
+            writeLine({ type: `workflow.auto.${step.state}`, step, at: new Date().toISOString() });
+            return;
           }
 
           if (!options.json && !options.dryRun) {
@@ -581,7 +607,58 @@ export function buildCli(): Command {
       }
     });
 
+  const codex = program.command("codex");
+
+  codex
+    .command("session")
+    .option("--jsonl", "stream JSONL events to stdout", true)
+    .action(async () => {
+      try {
+        const adapter = new CodexAppServerAdapter();
+        const writeLine = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
+
+        writeLine({ type: "codex.session.started", at: new Date().toISOString() });
+
+        const rl = createInterface({ input: process.stdin });
+        for await (const line of rl) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (trimmed === "/exit" || trimmed === "/quit") break;
+
+          // Ignore prompt response lines (these are consumed by the Codex adapter stdin router).
+          try {
+            const parsed = JSON.parse(trimmed) as unknown;
+            if (isRecord(parsed) && parsed.type === "user_input.response") {
+              continue;
+            }
+          } catch {
+            // ignore
+          }
+
+          const handle = await adapter.startRun({
+            taskId: "codex-session",
+            prompt: trimmed,
+            workingDirectory: process.cwd(),
+            allowedTools: [],
+            approvalMode: process.stdin.isTTY ? "suggest" : "full-auto"
+          });
+
+          for await (const event of adapter.streamEvents(handle.runId)) {
+            writeLine({ type: "adapter.event", event });
+          }
+        }
+
+        writeLine({ type: "codex.session.ended", at: new Date().toISOString() });
+      } catch (error) {
+        fail(error);
+      }
+    });
+
   return program;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 async function resolvePhaseGateScript(workspaceRoot: string, phase: string): Promise<string> {

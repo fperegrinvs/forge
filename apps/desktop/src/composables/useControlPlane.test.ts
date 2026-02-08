@@ -6,6 +6,10 @@ const { fetchMock } = vi.hoisted(() => ({
 
 import {
   getEvidence,
+  codexSessionCancel,
+  codexSessionPromptRespond,
+  codexSessionSend,
+  codexSessionStreamUrl,
   listTemplates,
   packsCheckUpdates,
   packsDownload,
@@ -19,9 +23,9 @@ import {
   projectGetGuidanceStatus,
   projectInit,
   projectInstallGuidance,
-  runNextStreamCancel,
-  runNextStreamInput,
-  runNextStreamUrl,
+  workflowAutoCancel,
+  workflowAutoPromptRespond,
+  workflowAutoStreamUrl,
   selectFile,
   selectFolder
 } from "./useControlPlane";
@@ -53,37 +57,37 @@ describe("useControlPlane", () => {
     expect((init!.headers as Headers).get("content-type")).toBe("application/json");
   });
 
-  it("builds run_next_stream URL with expected query params", async () => {
+  it("builds workflow_auto_stream URL with expected query params", async () => {
     // Given a project root and plan path
-    // When the run next stream URL is built
-    const url = runNextStreamUrl("/tmp/project", "/tmp/plan.json", "codex");
+    // When the workflow auto stream URL is built
+    const url = workflowAutoStreamUrl("/tmp/project", "/tmp/plan.json", "codex", false);
 
     // Then it targets the SSE endpoint with required query params
     expect(url).toBe(
-      "http://localhost:1420/api/run/next/stream?projectRoot=%2Ftmp%2Fproject&planPath=%2Ftmp%2Fplan.json&adapter=codex"
+      "http://localhost:1420/api/workflow/auto/stream?projectRoot=%2Ftmp%2Fproject&planPath=%2Ftmp%2Fplan.json&adapter=codex&push=false"
     );
   });
 
-  it("calls run_next_stream_input", async () => {
-    // Given the backend accepts input
+  it("calls workflow_auto_prompt_respond", async () => {
+    // Given the backend accepts prompt responses
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => true
     });
 
-    // When stream input is sent
-    const result = await runNextStreamInput("stream-1", "hello");
+    // When a prompt response is sent
+    const result = await workflowAutoPromptRespond("stream-1", "req-1", { q1: { answers: ["Option A"] } });
 
     // Then the expected API call occurs
     expect(result).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("/api/run/next/input");
+    expect(url).toBe("/api/workflow/auto/prompt/respond");
     expect(init?.method).toBe("POST");
-    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-1", text: "hello" }));
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-1", requestId: "req-1", answers: { q1: { answers: ["Option A"] } } }));
   });
 
-  it("calls run_next_stream_cancel", async () => {
+  it("calls workflow_auto_cancel", async () => {
     // Given the backend accepts cancellation
     fetchMock.mockResolvedValue({
       ok: true,
@@ -91,13 +95,48 @@ describe("useControlPlane", () => {
     });
 
     // When stream cancel is requested
-    const result = await runNextStreamCancel("stream-2");
+    const result = await workflowAutoCancel("stream-2");
 
     // Then the expected API call occurs
     expect(result).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("/api/run/next/cancel");
+    expect(url).toBe("/api/workflow/auto/cancel");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-2" }));
+  });
+
+  it("builds codex_session_stream URL with expected query params", async () => {
+    const url = codexSessionStreamUrl("/tmp/project");
+    expect(url).toBe("http://localhost:1420/api/codex/session/stream?projectRoot=%2Ftmp%2Fproject");
+  });
+
+  it("calls codex_session_send", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => true });
+    const result = await codexSessionSend("stream-1", "hello");
+    expect(result).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/codex/session/send");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-1", text: "hello" }));
+  });
+
+  it("calls codex_session_prompt_respond", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => true });
+    const result = await codexSessionPromptRespond("stream-1", "req-1", { q1: { answers: ["x"] } });
+    expect(result).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/codex/session/prompt/respond");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-1", requestId: "req-1", answers: { q1: { answers: ["x"] } } }));
+  });
+
+  it("calls codex_session_cancel", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => true });
+    const result = await codexSessionCancel("stream-2");
+    expect(result).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/codex/session/cancel");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ streamId: "stream-2" }));
   });

@@ -95,15 +95,8 @@ describe("new plan spawn config", () => {
     expect(config).toEqual({ command: "claude", cwd: "/tmp/project" });
   });
 
-  it("builds codex config with TERM/env and no-alt-screen", () => {
+  it("builds default config for other adapters", () => {
     const config = buildNewPlanSpawnConfig("codex", "/tmp/project");
-    expect(config.command).toBe("codex");
-    expect(config.cwd).toBe("/tmp/project");
-    expect(config.args).toEqual(["--no-alt-screen"]);
-    expect(config.env).toEqual({
-      TERM: "xterm-256color",
-      COLORTERM: "truecolor",
-      RUST_BACKTRACE: "1"
-    });
+    expect(config).toEqual({ command: "codex", cwd: "/tmp/project" });
   });
 });
