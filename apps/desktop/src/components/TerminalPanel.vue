@@ -50,6 +50,7 @@ function connect(sessionId: string): void {
   if (terminalEl.value) {
     terminal.open(terminalEl.value);
     fitAddon.fit();
+    terminal.focus();
 
     resizeObserver = new ResizeObserver(() => {
       if (fitAddon && terminal) {
@@ -66,10 +67,12 @@ function connect(sessionId: string): void {
   }
 
   const url = terminalWsUrl(sessionId);
+  let opened = false;
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
 
   ws.addEventListener("open", () => {
+    opened = true;
     emit("connected");
   });
 
@@ -83,9 +86,16 @@ function connect(sessionId: string): void {
     }
   });
 
-  ws.addEventListener("close", () => {
+  ws.addEventListener("close", (event) => {
+    if (!opened) {
+      emit("error", `WebSocket closed before opening (url=${url})`);
+      emit("disconnected");
+      return;
+    }
+    const shouldRetry = !event.wasClean && event.code !== 1000 && event.code !== 1001;
+
     // Single retry on unexpected disconnect
-    if (currentSessionId && terminal) {
+    if (shouldRetry && currentSessionId && terminal) {
       const retryUrl = terminalWsUrl(currentSessionId);
       const retryWs = new WebSocket(retryUrl);
       retryWs.binaryType = "arraybuffer";
@@ -103,6 +113,7 @@ function connect(sessionId: string): void {
         retryWs.addEventListener("close", () => emit("disconnected"));
       });
       retryWs.addEventListener("error", () => {
+        emit("error", `WebSocket connection error (url=${retryUrl})`);
         emit("disconnected");
       });
     } else {
@@ -111,7 +122,7 @@ function connect(sessionId: string): void {
   });
 
   ws.addEventListener("error", () => {
-    emit("error", "WebSocket connection error");
+    emit("error", `WebSocket connection error (url=${url})`);
   });
 
   terminal.onData((data) => {

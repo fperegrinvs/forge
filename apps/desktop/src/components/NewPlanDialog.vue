@@ -70,6 +70,9 @@
           />
 
           <div class="flex-grow-1" style="min-width: 0; min-height: 0;">
+            <v-alert v-if="error" type="error" variant="tonal" class="mb-2">
+              {{ error }}
+            </v-alert>
             <TerminalPanel
               v-if="sessionId"
               :session-id="sessionId"
@@ -147,9 +150,25 @@ watch(open, async (value) => {
     error.value = "";
     sessionId.value = "";
     try {
+      const isCodex = props.adapter === "codex";
+      const codexEnv = isCodex
+        ? {
+            TERM: "xterm-256color",
+            COLORTERM: "truecolor",
+            RUST_BACKTRACE: "1"
+          }
+        : undefined;
+
+      // Work around Codex CLI occasionally aborting when run directly under our PTY on macOS.
+      // `script` allocates its own PTY and tends to be a more "normal" terminal environment.
+      const command = isCodex ? "/usr/bin/script" : props.adapter;
+      const args = isCodex ? ["-q", "/dev/null", "codex", "--no-alt-screen"] : undefined;
+
       const result = await terminalSpawn({
-        command: props.adapter,
-        cwd: props.projectRoot
+        command,
+        cwd: props.projectRoot,
+        args,
+        env: codexEnv
       });
       sessionId.value = result.sessionId;
     } catch (e) {

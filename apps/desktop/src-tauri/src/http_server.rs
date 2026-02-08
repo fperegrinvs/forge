@@ -1023,62 +1023,59 @@ async fn terminal_ws(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let terminal = state.terminal.clone();
+    if !terminal.session_exists(&id) {
+        return api_error(StatusCode::NOT_FOUND, format!("session not found: {id}")).into_response();
+    }
     ws.on_upgrade(move |socket| handle_terminal_ws(socket, terminal, id))
 }
 
 async fn handle_terminal_ws(socket: WebSocket, terminal: TerminalManager, id: String) {
-    let (reader, writer) = match terminal.take_io(&id) {
-        Ok(io) => io,
+    eprintln!("terminal: ws attach {id}");
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    // Flush any output that happened before a WS receiver existed.
+    // Loop to catch output generated while we are still flushing.
+    for _ in 0..32 {
+        let buffered = match terminal.drain_output_buffer(&id) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+        if buffered.is_empty() {
+            break;
+        }
+        for chunk in buffered {
+            if ws_sender.send(Message::Binary(chunk)).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    let attach = match terminal.attach(&id) {
+        Ok(a) => a,
         Err(_) => return,
     };
 
-    let (mut ws_sender, mut ws_receiver) = socket.split();
-
-    let (tx_to_ws, mut rx_to_ws) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
-    let (tx_to_pty, rx_to_pty) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
-
-    // PTY reader → channel → WebSocket
-    tokio::task::spawn_blocking(move || {
-        use std::io::Read;
-        let mut reader = reader;
-        let mut buf = [0u8; 4096];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if tx_to_ws.blocking_send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
+    // Catch the small race window between final pre-flush and subscribe.
+    if let Ok(buffered) = terminal.drain_output_buffer(&id) {
+        for chunk in buffered {
+            if ws_sender.send(Message::Binary(chunk)).await.is_err() {
+                return;
             }
         }
-    });
-
-    // Channel → PTY writer
-    tokio::task::spawn_blocking(move || {
-        use std::io::Write;
-        let mut writer = writer;
-        let mut rx = rx_to_pty;
-        while let Some(data) = rx.blocking_recv() {
-            if writer.write_all(&data).is_err() {
-                break;
-            }
-            let _ = writer.flush();
-        }
-    });
+    }
 
     // Forward WebSocket messages → PTY stdin
     let ws_to_pty = async {
+        let input_tx = attach.input_tx;
         while let Some(Ok(msg)) = ws_receiver.next().await {
             match msg {
                 Message::Text(text) => {
-                    if tx_to_pty.send(text.into_bytes()).await.is_err() {
+                    if input_tx.send(text.into_bytes()).await.is_err() {
                         break;
                     }
                 }
                 Message::Binary(data) => {
-                    if tx_to_pty.send(data.to_vec()).await.is_err() {
+                    if input_tx.send(data.to_vec()).await.is_err() {
                         break;
                     }
                 }
@@ -1090,9 +1087,16 @@ async fn handle_terminal_ws(socket: WebSocket, terminal: TerminalManager, id: St
 
     // Forward PTY stdout → WebSocket
     let pty_to_ws = async {
-        while let Some(data) = rx_to_ws.recv().await {
-            if ws_sender.send(Message::Binary(data)).await.is_err() {
-                break;
+        let mut output_rx = attach.output_rx;
+        loop {
+            match output_rx.recv().await {
+                Ok(data) => {
+                    if ws_sender.send(Message::Binary(data)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
             }
         }
     };
@@ -1101,6 +1105,8 @@ async fn handle_terminal_ws(socket: WebSocket, terminal: TerminalManager, id: St
         _ = ws_to_pty => {},
         _ = pty_to_ws => {},
     }
+
+    eprintln!("terminal: ws detach {id}");
 }
 
 async fn spa_index(State(state): State<ServerState>) -> impl IntoResponse {
