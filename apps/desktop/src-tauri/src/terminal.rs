@@ -83,7 +83,18 @@ impl TerminalManager {
             })
             .map_err(|e| format!("openpty failed: {e}"))?;
 
-        let mut cmd = portable_pty::CommandBuilder::new(&config.command);
+        // Codex CLI has been observed to abort on macOS when spawned directly under a PTY.
+        // Wrapping through `script` allocates a PTY in a way Codex is happier with.
+        let mut cmd = if cfg!(target_os = "macos") && config.command == "codex" {
+            let mut cb = portable_pty::CommandBuilder::new("/usr/bin/script");
+            cb.arg("-q");
+            cb.arg("/dev/null");
+            cb.arg("codex");
+            cb
+        } else {
+            portable_pty::CommandBuilder::new(&config.command)
+        };
+
         for arg in &config.args {
             cmd.arg(arg);
         }

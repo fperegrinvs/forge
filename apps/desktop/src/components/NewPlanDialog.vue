@@ -104,6 +104,7 @@ import { computed, ref, watch } from "vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
 import { getSkillInvocation } from "./planDialogInstructions";
+import { buildNewPlanSpawnConfig } from "./newPlanSpawnConfig";
 
 interface DiscoveredPlan {
   filename: string;
@@ -150,26 +151,8 @@ watch(open, async (value) => {
     error.value = "";
     sessionId.value = "";
     try {
-      const isCodex = props.adapter === "codex";
-      const codexEnv = isCodex
-        ? {
-            TERM: "xterm-256color",
-            COLORTERM: "truecolor",
-            RUST_BACKTRACE: "1"
-          }
-        : undefined;
-
-      // Work around Codex CLI occasionally aborting when run directly under our PTY on macOS.
-      // `script` allocates its own PTY and tends to be a more "normal" terminal environment.
-      const command = isCodex ? "/usr/bin/script" : props.adapter;
-      const args = isCodex ? ["-q", "/dev/null", "codex", "--no-alt-screen"] : undefined;
-
-      const result = await terminalSpawn({
-        command,
-        cwd: props.projectRoot,
-        args,
-        env: codexEnv
-      });
+      const spawnConfig = buildNewPlanSpawnConfig(props.adapter, props.projectRoot);
+      const result = await terminalSpawn(spawnConfig);
       sessionId.value = result.sessionId;
     } catch (e) {
       error.value = `Failed to start terminal: ${String(e)}`;

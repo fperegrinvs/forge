@@ -6,6 +6,7 @@ const { fetchMock } = vi.hoisted(() => ({
 
 import { terminalKill, terminalSpawn } from "../composables/useTerminal";
 import { getSkillInvocation } from "./planDialogInstructions";
+import { buildNewPlanSpawnConfig } from "./newPlanSpawnConfig";
 
 describe("NewPlanDialog spawn/kill lifecycle", () => {
   beforeEach(() => {
@@ -85,5 +86,24 @@ describe("NewPlanDialog adapter-specific instructions", () => {
     const result = getSkillInvocation("some-other-agent");
     // Then it falls back to the slash command syntax
     expect(result).toBe("Type `/plan-guided` and press Enter");
+  });
+});
+
+describe("new plan spawn config", () => {
+  it("builds claude config", () => {
+    const config = buildNewPlanSpawnConfig("claude", "/tmp/project");
+    expect(config).toEqual({ command: "claude", cwd: "/tmp/project" });
+  });
+
+  it("builds codex config with TERM/env and no-alt-screen", () => {
+    const config = buildNewPlanSpawnConfig("codex", "/tmp/project");
+    expect(config.command).toBe("codex");
+    expect(config.cwd).toBe("/tmp/project");
+    expect(config.args).toEqual(["--no-alt-screen"]);
+    expect(config.env).toEqual({
+      TERM: "xterm-256color",
+      COLORTERM: "truecolor",
+      RUST_BACKTRACE: "1"
+    });
   });
 });

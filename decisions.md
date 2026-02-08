@@ -9,6 +9,7 @@ Track repository-level technical decisions and rationale.
 - Removed the explicit "Validate Plan" button; validation happens automatically in the background and "Run" blocks when invalid.
 - Renamed the desktop adapter label from "claude" to "Claude Code" (internal value remains `claude`).
 - Claude adapter now runs Claude Code in non-interactive mode with explicit permissions/tool allowlist and better prompt/flag ordering; control-plane surfaces `claude --resume <id>` when a session ID is available.
+- Stabilized the Codex terminal used by New Plan: keep PTY master alive across WS reconnects, buffer initial output until WS attach, and (macOS only) wrap `codex` in `/usr/bin/script` to avoid Codex aborting on stdout writes; also improved WS error reporting and focus.
 - Added a pre-push git hook to run `typecheck` before pushing (configurable via env), shipped and auto-configured via guidance pack install when `.githooks/` is present and `core.hooksPath` is unset.
 
 ## 2026-02-07 (unified Run action & schema improvements)
