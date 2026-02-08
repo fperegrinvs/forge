@@ -3,8 +3,8 @@ import { join, resolve } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { ForgeControlPlane, ForgeWorkflowRunner } from "@forge/control-plane";
-import { CodexAdapter } from "@forge/adapter-codex";
-import { ClaudeAdapter } from "@forge/adapter-claude";
+import { CodexAppServerAdapter } from "@forge/adapter-codex";
+import { ClaudePtyAdapter } from "@forge/adapter-claude";
 import { exists, readJsonFile, runCommand } from "@forge/shared-utils";
 import {
   getBundledGuidanceRoot,
@@ -443,12 +443,15 @@ export function buildCli(): Command {
           throw new Error("--max-retries must be a positive integer");
         }
 
+        const codexAdapter = options.dryRun ? null : new CodexAppServerAdapter();
+        const claudeAdapter = options.dryRun ? null : new ClaudePtyAdapter();
+
         const runner = new ForgeWorkflowRunner(
-	          workspaceRoot,
-	          (type) => {
-	            if (options.dryRun) {
-	              const startRun = () => Promise.resolve({ runId: "dry-run" });
-	              const streamEvents = async function* (runId: string) {
+          workspaceRoot,
+          (type) => {
+            if (options.dryRun) {
+              const startRun = () => Promise.resolve({ runId: "dry-run" });
+              const streamEvents = async function* (runId: string) {
 	                // Keep the generator async to match the adapter interface contract.
 	                await Promise.resolve();
 	                yield { type: "run.started", runId, at: new Date().toISOString() } as const;
@@ -460,11 +463,16 @@ export function buildCli(): Command {
 	                startRun,
 	                streamEvents,
 	                resume,
-	                cancel
-	              };
-	            }
-	            return type === "codex" ? new CodexAdapter() : new ClaudeAdapter();
-	          },
+                cancel
+              };
+            }
+            if (type === "codex") {
+              if (!codexAdapter) throw new Error("codex adapter unavailable");
+              return codexAdapter;
+            }
+            if (!claudeAdapter) throw new Error("claude adapter unavailable");
+            return claudeAdapter;
+          },
           {
             gateRunner: async (phase: string, cwd: string) => {
               if (options.dryRun) {
