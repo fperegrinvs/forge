@@ -270,7 +270,10 @@ export class ClaudeAdapter implements AgentAdapter {
     if (!run) {
       return Promise.reject(new Error(`run not found: ${runId}`));
     }
-    return Promise.resolve({ runId, externalRunId: run.externalRunId });
+    if (run.externalRunId) {
+      return Promise.resolve({ runId, externalRunId: run.externalRunId });
+    }
+    return Promise.resolve({ runId });
   }
 
   cancel(runId: string): Promise<void> {
