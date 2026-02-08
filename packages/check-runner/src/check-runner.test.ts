@@ -20,10 +20,13 @@ describe("ScriptCheckRunner", () => {
     expect(result[0]?.status).toBe("pass");
   });
 
-  it("returns infra_error for missing bindings", async () => {
+  it("returns empty results for missing bindings", async () => {
+    // Given no registered check bindings
     const runner = new ScriptCheckRunner(new Map());
+    // When checks are run for an unknown task type
     const result = await runner.runChecks("unknown", "task-1", process.cwd());
-    expect(result[0]?.status).toBe("infra_error");
+    // Then no checks are reported (no gates = pass)
+    expect(result).toEqual([]);
   });
 
   it("returns fail when script exits non-zero", async () => {
@@ -82,12 +85,15 @@ describe("ScriptCheckRunner", () => {
     expect(registry.get("implementation")?.scripts).toEqual([gateA, gateB]);
   });
 
-  it("returns infra_error when task type has no gate scripts", async () => {
+  it("returns empty results when task type has no gate scripts", async () => {
+    // Given a task type directory with no gate scripts
     const root = await mkdtemp(join(tmpdir(), "forge-checks-empty-"));
     await mkdir(join(root, "implementation"), { recursive: true });
     const registry = await loadTaskTypeRegistry(root);
     const runner = new ScriptCheckRunner(registry);
+    // When checks are run
     const result = await runner.runChecks("implementation", "task-1", root);
-    expect(result[0]?.status).toBe("infra_error");
+    // Then no checks are reported (no gates = pass)
+    expect(result).toEqual([]);
   });
 });

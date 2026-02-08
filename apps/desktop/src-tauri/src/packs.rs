@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -38,6 +39,25 @@ pub struct PackUpdateStatus {
   pub installed_version: Option<String>,
   pub latest_version: Option<String>,
   pub has_update: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowPhase {
+  pub id: String,
+  pub gate: String,
+  pub commit: bool,
+  pub diagnostic: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackContent {
+  pub name: String,
+  pub version: String,
+  pub phases: Vec<WorkflowPhase>,
+  pub rules: Vec<String>,
+  pub skills: Vec<String>,
 }
 
 fn parse_semver(value: &str) -> Option<(u64, u64, u64)> {
@@ -171,6 +191,238 @@ pub fn read_installed_packs(app_data_dir: &Path) -> Result<Vec<InstalledPack>, S
   }
 
   Ok(installed)
+}
+
+fn read_pack_manifest(pack_dir: &Path) -> Result<(String, String), String> {
+  let manifest_path = pack_dir.join("manifest.json");
+  if !manifest_path.exists() {
+    return Err("pack is missing manifest.json".to_string());
+  }
+  let raw =
+    fs::read_to_string(&manifest_path).map_err(|error| format!("read manifest.json: {error}"))?;
+  let value: serde_json::Value =
+    serde_json::from_str(&raw).map_err(|error| format!("parse manifest.json: {error}"))?;
+  let name = value
+    .get("name")
+    .and_then(|v| v.as_str())
+    .unwrap_or("")
+    .trim()
+    .to_string();
+  let version = value
+    .get("version")
+    .and_then(|v| v.as_str())
+    .unwrap_or("")
+    .trim()
+    .to_string();
+  if name.is_empty() || version.is_empty() {
+    return Err("manifest.json is missing required fields (name/version)".to_string());
+  }
+  Ok((name, version))
+}
+
+fn parse_yes_no(value: &str) -> bool {
+  matches!(
+    value.trim().to_lowercase().as_str(),
+    "yes" | "y" | "true" | "1"
+  )
+}
+
+fn parse_agents_phase_gate_table(markdown: &str) -> Vec<WorkflowPhase> {
+  let lines: Vec<&str> = markdown.lines().collect();
+  let mut i = 0usize;
+
+  // Find a header row like: "| Phase | Gate | Commit | Diagnostic |"
+  while i < lines.len() {
+    let line = lines[i].trim();
+    if line.starts_with('|') {
+      let header_cells: Vec<String> = line
+        .trim_matches('|')
+        .split('|')
+        .map(|c| c.trim().to_lowercase())
+        .collect();
+      let is_header = header_cells.len() >= 3
+        && header_cells[0] == "phase"
+        && header_cells[1] == "gate"
+        && header_cells[2] == "commit";
+      if !is_header {
+        i += 1;
+        continue;
+      }
+
+      // Optional separator row next (|---|---|...|)
+      if i + 1 < lines.len() && lines[i + 1].trim().starts_with('|') {
+        i += 2;
+      } else {
+        i += 1;
+      }
+
+      let mut phases = vec![];
+      while i < lines.len() {
+        let row = lines[i].trim();
+        if !row.starts_with('|') {
+          break;
+        }
+        // Skip separator-ish rows.
+        if row.chars().all(|c| c == '|' || c == '-' || c == ' ' || c == '\t') {
+          i += 1;
+          continue;
+        }
+        let cells: Vec<String> = row
+          .trim_matches('|')
+          .split('|')
+          .map(|c| c.trim().to_string())
+          .collect();
+        if cells.len() < 2 {
+          i += 1;
+          continue;
+        }
+
+        // Column order: Phase | Gate | Commit | Diagnostic
+        let id = cells[0].trim().to_string();
+        let gate = cells[1].trim().to_string();
+        if id.is_empty() || gate.is_empty() {
+          i += 1;
+          continue;
+        }
+        let commit = cells.get(2).map(|s| parse_yes_no(s)).unwrap_or(false);
+        let diagnostic = cells.get(3).map(|s| parse_yes_no(s)).unwrap_or(false);
+
+        phases.push(WorkflowPhase {
+          id,
+          gate,
+          commit,
+          diagnostic,
+        });
+        i += 1;
+      }
+
+      return phases;
+    }
+    i += 1;
+  }
+
+  vec![]
+}
+
+fn list_rule_ids(pack_dir: &Path) -> Result<Vec<String>, String> {
+  let rules_dir = pack_dir.join("rules");
+  if !rules_dir.is_dir() {
+    return Ok(vec![]);
+  }
+
+  let mut ids = BTreeSet::<String>::new();
+  fn walk(base: &Path, dir: &Path, ids: &mut BTreeSet<String>) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("read rules dir: {e}"))?;
+    for entry in entries {
+      let entry = entry.map_err(|e| format!("read rules entry: {e}"))?;
+      let path = entry.path();
+      let ty = entry.file_type().map_err(|e| format!("stat rules entry: {e}"))?;
+      if ty.is_dir() {
+        walk(base, &path, ids)?;
+        continue;
+      }
+      if !ty.is_file() {
+        continue;
+      }
+      if path.extension().and_then(|e| e.to_str()) != Some("md") {
+        continue;
+      }
+      let rel = path
+        .strip_prefix(base)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .replace('\\', "/");
+      let id = rel.trim_end_matches(".md").to_string();
+      if !id.is_empty() {
+        ids.insert(id);
+      }
+    }
+    Ok(())
+  }
+  walk(&rules_dir, &rules_dir, &mut ids)?;
+  Ok(ids.into_iter().collect())
+}
+
+fn list_skill_ids(pack_dir: &Path) -> Result<Vec<String>, String> {
+  let skills_dir = pack_dir.join("skills");
+  if !skills_dir.is_dir() {
+    return Ok(vec![]);
+  }
+
+  let mut ids = BTreeSet::<String>::new();
+  fn walk(base: &Path, dir: &Path, ids: &mut BTreeSet<String>) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("read skills dir: {e}"))?;
+    for entry in entries {
+      let entry = entry.map_err(|e| format!("read skills entry: {e}"))?;
+      let path = entry.path();
+      let ty = entry.file_type().map_err(|e| format!("stat skills entry: {e}"))?;
+      if ty.is_dir() {
+        walk(base, &path, ids)?;
+        continue;
+      }
+      if !ty.is_file() {
+        continue;
+      }
+      if path.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
+        continue;
+      }
+      let parent = match path.parent() {
+        Some(p) => p,
+        None => continue,
+      };
+      let rel = parent
+        .strip_prefix(base)
+        .unwrap_or(parent)
+        .to_string_lossy()
+        .replace('\\', "/");
+      if !rel.is_empty() && rel != "." {
+        ids.insert(rel);
+      }
+    }
+    Ok(())
+  }
+
+  walk(&skills_dir, &skills_dir, &mut ids)?;
+  Ok(ids.into_iter().collect())
+}
+
+pub fn read_pack_content(pack_dir: &Path) -> Result<PackContent, String> {
+  if !pack_dir.exists() {
+    return Err(format!(
+      "pack path does not exist: {}",
+      pack_dir.to_string_lossy()
+    ));
+  }
+  if !pack_dir.is_dir() {
+    return Err(format!(
+      "pack path is not a directory: {}",
+      pack_dir.to_string_lossy()
+    ));
+  }
+
+  let (name, version) = read_pack_manifest(pack_dir)?;
+
+  let phases = {
+    let agents_path = pack_dir.join("AGENTS.md");
+    if agents_path.exists() {
+      let raw =
+        fs::read_to_string(&agents_path).map_err(|e| format!("read AGENTS.md: {e}"))?;
+      parse_agents_phase_gate_table(&raw)
+    } else {
+      vec![]
+    }
+  };
+
+  let rules = list_rule_ids(pack_dir)?;
+  let skills = list_skill_ids(pack_dir)?;
+
+  Ok(PackContent {
+    name,
+    version,
+    phases,
+    rules,
+    skills,
+  })
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
@@ -771,5 +1023,101 @@ Central directory entry #2:
 
     // Then it is detected
     assert!(offending.is_some());
+  }
+
+  #[test]
+  fn read_pack_content_parses_phases_rules_and_skills() {
+    // Given a pack directory with manifest, AGENTS table, rules, and skills
+    let dir = PathBuf::from("/tmp/forge-test-pack-content");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+      dir.join("manifest.json"),
+      r#"{"name":"forge-guidance-pack","version":"1.2.3"}"#,
+    )
+    .unwrap();
+    fs::write(
+      dir.join("AGENTS.md"),
+      r#"
+## Phase → Gate → Commit
+
+| Phase | Gate | Commit | Diagnostic |
+|-------|------|--------|------------|
+| spec | spec | yes | yes |
+| implement | green | yes | no |
+| refactor | refactor | yes | no |
+| document | docs | yes | no |
+| commit | verify | no | no |
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("rules")).unwrap();
+    fs::write(dir.join("rules").join("testing.md"), "# testing").unwrap();
+    fs::create_dir_all(dir.join("skills").join("spec-bdd")).unwrap();
+    fs::write(dir.join("skills").join("spec-bdd").join("SKILL.md"), "# skill").unwrap();
+
+    // When pack content is read
+    let content = read_pack_content(&dir).unwrap();
+
+    // Then manifest fields are returned
+    assert_eq!(content.name, "forge-guidance-pack");
+    assert_eq!(content.version, "1.2.3");
+
+    // And phases are parsed in order
+    assert_eq!(content.phases.len(), 5);
+    assert_eq!(content.phases[0].id, "spec");
+    assert_eq!(content.phases[0].gate, "spec");
+    assert!(content.phases[0].diagnostic);
+    assert!(content.phases[0].commit);
+    assert_eq!(content.phases[4].id, "commit");
+    assert_eq!(content.phases[4].gate, "verify");
+    assert!(!content.phases[4].commit);
+    assert!(!content.phases[4].diagnostic);
+
+    // And rules/skills are listed
+    assert_eq!(content.rules, vec!["testing".to_string()]);
+    assert_eq!(content.skills, vec!["spec-bdd".to_string()]);
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn read_pack_content_returns_empty_phases_when_agents_missing() {
+    // Given a pack directory with a manifest but no AGENTS.md
+    let dir = PathBuf::from("/tmp/forge-test-pack-content-no-agents");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+      dir.join("manifest.json"),
+      r#"{"name":"forge-guidance-pack","version":"1.2.3"}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("rules")).unwrap();
+    fs::write(dir.join("rules").join("workflow.md"), "# workflow").unwrap();
+
+    // When pack content is read
+    let content = read_pack_content(&dir).unwrap();
+
+    // Then phases are empty, but rules are returned
+    assert!(content.phases.is_empty());
+    assert_eq!(content.rules, vec!["workflow".to_string()]);
+
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn read_pack_content_errors_when_manifest_missing() {
+    // Given a directory without manifest.json
+    let dir = PathBuf::from("/tmp/forge-test-pack-content-no-manifest");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    // When pack content is read
+    let err = read_pack_content(&dir).unwrap_err();
+
+    // Then it errors clearly
+    assert!(err.contains("manifest.json"));
+
+    let _ = fs::remove_dir_all(&dir);
   }
 }

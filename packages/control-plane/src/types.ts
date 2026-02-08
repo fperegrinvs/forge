@@ -15,7 +15,6 @@ export type RuntimeState = {
   planPath: string;
   tasks: Record<string, TaskState>;
   pausedRun?: PausedRunState;
-  pausedRunId?: string;
 };
 
 export type RunNextResult = {

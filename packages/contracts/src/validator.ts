@@ -105,7 +105,7 @@ function detectCycle(plan: Plan): string[] {
   return [];
 }
 
-export function validatePlanGraph(plan: Plan, registeredTaskTypes: Set<string>): PlanValidationResult {
+export function validatePlanGraph(plan: Plan): PlanValidationResult {
   const issues: ValidationIssue[] = [];
   const ids = new Set<string>();
 
@@ -118,14 +118,6 @@ export function validatePlanGraph(plan: Plan, registeredTaskTypes: Set<string>):
       });
     }
     ids.add(task.id);
-
-    if (!registeredTaskTypes.has(task.task_type)) {
-      issues.push({
-        path: `/tasks/${task.id}/task_type`,
-        message: `Unknown task type: ${task.task_type}`,
-        code: "unknown_task_type"
-      });
-    }
   }
 
   for (const task of plan.tasks) {

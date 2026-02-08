@@ -281,7 +281,8 @@ describe("cli", () => {
     }
   });
 
-  it("prints paused run information for run next", async () => {
+  it("auto-resumes paused run when run next is called", async () => {
+    // Given a workspace where the only task is already completed but a stale pausedRun exists
     const root = await mkdtemp(join(tmpdir(), "forge-run-"));
     await mkdir(join(root, "checks", "task-types", "documentation"), { recursive: true });
     await mkdir(join(root, ".forge"), { recursive: true });
@@ -327,9 +328,11 @@ describe("cli", () => {
     const planPath = join(root, "plan.json");
     await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 
+    // State has a pausedRun but the task is already completed
+    // Previously runNext would refuse to proceed; now it should auto-resume and see no pending tasks
     const state = {
       planPath,
-      tasks: { "docs-1": "pending" },
+      tasks: { "docs-1": "completed" },
       pausedRun: {
         runId: "run-1",
         adapterType: "codex",
@@ -342,14 +345,98 @@ describe("cli", () => {
     const previous = process.cwd();
     process.chdir(root);
     try {
+      // When run next is called on a workspace with a stale paused run
       const { stdout } = await captureStdio(async () => {
         const cli = buildCli();
-        await cli.parseAsync(["node", "forge", "run", "next", "--plan", planPath]);
+        await cli.parseAsync(["node", "forge", "run", "next", "--plan", planPath, "--json"]);
       });
 
-      expect(stdout).toContain("Execution is paused");
-      expect(stdout).toContain("externalRunId: ext-1");
-      expect(stdout).toContain("manualResume: codex resume ext-1");
+      // Then it auto-resumes (clears pausedRun) and reports no runnable tasks
+      const parsed = JSON.parse(stdout) as { state: string; message: string };
+      expect(parsed.state).toBe("completed");
+      expect(parsed.message).toContain("No runnable tasks remain");
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it("streams JSONL when run next is invoked with --jsonl", async () => {
+    // Given a workspace with a plan whose only task is already completed
+    const root = await mkdtemp(join(tmpdir(), "forge-run-jsonl-"));
+    await mkdir(join(root, "checks", "task-types", "documentation"), { recursive: true });
+    await mkdir(join(root, ".forge"), { recursive: true });
+
+    const now = new Date().toISOString();
+    const plan = {
+      metadata: {
+        project: "forge-test",
+        created: now,
+        last_updated: now,
+        spec_version: "v2",
+        approved: true
+      },
+      context: {
+        goals: ["exercise run next jsonl"],
+        constraints: [],
+        tech_decisions: {},
+        architecture: "modulith"
+      },
+      tasks: [
+        {
+          id: "docs-1",
+          task_type: "documentation",
+          name: "Docs",
+          description: "A no-op docs task",
+          files: [],
+          dependencies: [],
+          acceptance_criteria: ["ok"],
+          verification_command: "true",
+          tests: {
+            bdd_scenarios: [],
+            property_invariants: [],
+            contract_tests: []
+          },
+          documentation: {
+            updates: [],
+            decision_notes: ""
+          }
+        }
+      ]
+    };
+
+    const planPath = join(root, "plan.json");
+    await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+
+    // And state pre-seeded so there are no runnable tasks (avoids spawning an adapter)
+    await writeFile(
+      join(root, ".forge", "state.json"),
+      `${JSON.stringify({ planPath, tasks: { "docs-1": "completed" } }, null, 2)}\n`,
+      "utf8"
+    );
+
+    const previous = process.cwd();
+    process.chdir(root);
+    try {
+      // When run next is executed with --jsonl
+      const { stdout } = await captureStdio(async () => {
+        const cli = buildCli();
+        await cli.parseAsync(["node", "forge", "run", "next", "--plan", planPath, "--jsonl"]);
+      });
+
+      // Then it emits JSONL lines including a started marker and a final result
+      const lines = stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      expect(lines.length).toBeGreaterThanOrEqual(2);
+
+      const first = JSON.parse(lines[0]!) as { type: string };
+      expect(first.type).toBe("run.next.started");
+
+      const last = JSON.parse(lines[lines.length - 1]!) as { type: string; result: { state: string } };
+      expect(last.type).toBe("run.next.result");
+      expect(last.result.state).toBe("completed");
     } finally {
       process.chdir(previous);
     }

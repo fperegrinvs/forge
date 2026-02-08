@@ -1,7 +1,10 @@
 import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import { exists } from "@forge/shared-utils";
 import {
   discoverSkills,
@@ -233,6 +236,31 @@ describe("guidance pack", () => {
     expect(first.claude).toContain("my-skill");
     expect(second.claude).toEqual([]);
     expect(second.codex).toEqual([]);
+  });
+
+  it("plan-constraints.md contains embedded schema matching contracts source of truth", async () => {
+    // Given the authoritative schema from contracts
+    const schemaPath = join(__dirname, "..", "..", "contracts", "src", "schema", "plan.v1.schema.json");
+    const schemaJson = JSON.parse(await readFile(schemaPath, "utf8"));
+
+    // And the plan-constraints.md reference doc
+    const constraintsPath = join(
+      getBundledGuidanceRoot(),
+      "skills",
+      "plan-guided",
+      "references",
+      "plan-constraints.md"
+    );
+    const constraintsMd = await readFile(constraintsPath, "utf8");
+
+    // When we extract the JSON code block containing "$schema"
+    const jsonBlocks = constraintsMd.match(/```json\n([\s\S]*?)```/g) ?? [];
+    const schemaBlock = jsonBlocks.find((block) => block.includes('"$schema"'));
+    expect(schemaBlock).toBeDefined();
+    const embedded = JSON.parse(schemaBlock!.replace(/```json\n/, "").replace(/```$/, ""));
+
+    // Then it matches the contracts source of truth
+    expect(embedded).toEqual(schemaJson);
   });
 
   it("keeps generated skills aligned with policy skill list", async () => {

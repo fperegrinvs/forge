@@ -16,6 +16,7 @@ export type PlanTask = {
     updates: string[];
     decision_notes: string;
   };
+  status?: "" | "spec" | "implement" | "refactor" | "document" | "completed";
   steps?: Array<{
     id: string;
     name: string;
@@ -48,7 +49,6 @@ export type ValidationIssue = {
     | "unknown_dependency"
     | "duplicate_task"
     | "cycle"
-    | "unknown_task_type"
     | "legacy_spec_version"
     | "missing_bdd_scenarios"
     | "missing_documentation_updates";

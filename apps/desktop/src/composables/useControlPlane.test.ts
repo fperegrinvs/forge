@@ -10,13 +10,15 @@ import {
   packsCheckUpdates,
   packsDownload,
   packsListInstalled,
-  pauseRun,
   planValidate,
+  plansList,
+  plansStatus,
   projectGetGuidanceStatus,
   projectInit,
   projectInstallGuidance,
-  resumeRun,
-  runNext,
+  runNextStreamCancel,
+  runNextStreamInput,
+  runNextStreamUrl,
   selectFolder
 } from "./useControlPlane";
 
@@ -47,23 +49,53 @@ describe("useControlPlane", () => {
     expect((init!.headers as Headers).get("content-type")).toBe("application/json");
   });
 
-  it("calls run_next", async () => {
-    // Given the backend returns a completed run result
+  it("builds run_next_stream URL with expected query params", async () => {
+    // Given a project root and plan path
+    // When the run next stream URL is built
+    const url = runNextStreamUrl("/tmp/project", "/tmp/plan.json", "codex");
+
+    // Then it targets the SSE endpoint with required query params
+    expect(url).toBe(
+      "http://localhost:1420/api/run/next/stream?projectRoot=%2Ftmp%2Fproject&planPath=%2Ftmp%2Fplan.json&adapter=codex"
+    );
+  });
+
+  it("calls run_next_stream_input", async () => {
+    // Given the backend accepts input
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => ({ state: "completed", runId: "run-1", message: "done" })
+      json: async () => true
     });
-    // When run next is requested
-    const result = await runNext("/tmp/project", "/tmp/plan.json", "codex");
-    // Then the API is called with expected args and the state is returned
-    expect(result.state).toBe("completed");
+
+    // When stream input is sent
+    const result = await runNextStreamInput("stream-1", "hello");
+
+    // Then the expected API call occurs
+    expect(result).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("/api/run/next");
+    expect(url).toBe("/api/run/next/input");
     expect(init?.method).toBe("POST");
-    expect(init?.body).toBe(JSON.stringify({ projectRoot: "/tmp/project", planPath: "/tmp/plan.json", adapter: "codex" }));
-    expect(init?.headers).toBeInstanceOf(Headers);
-    expect((init!.headers as Headers).get("content-type")).toBe("application/json");
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-1", text: "hello" }));
+  });
+
+  it("calls run_next_stream_cancel", async () => {
+    // Given the backend accepts cancellation
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => true
+    });
+
+    // When stream cancel is requested
+    const result = await runNextStreamCancel("stream-2");
+
+    // Then the expected API call occurs
+    expect(result).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/run/next/cancel");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ streamId: "stream-2" }));
   });
 
   it("calls packs + guidance endpoints", async () => {
@@ -194,17 +226,48 @@ describe("useControlPlane", () => {
     expect(result).toBeNull();
   });
 
-  it("calls pause and resume", async () => {
-    // Given pause and resume succeed
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => true })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: "completed", runId: "run-1", message: "ok" }) });
-
-    // When pause and resume are requested
-    expect(await pauseRun("run-1")).toBe(true);
-    const resumed = await resumeRun("/tmp/project", "/tmp/plan.json", "run-1", "codex");
-
-    // Then resume returns a run result
-    expect(resumed.state).toBe("completed");
+  it("plansList calls GET /api/plans/list and returns PlanFileEntry[]", async () => {
+    // Given the backend returns a list of plan files
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { filename: "add-auth.json", path: "/project/plans/add-auth.json" },
+        { filename: "fix-bug.json", path: "/project/plans/fix-bug.json" }
+      ]
+    });
+    // When plansList is called
+    const result = await plansList("/project");
+    // Then it calls GET /api/plans/list with projectRoot query param and returns entries
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://localhost:1420/api/plans/list?projectRoot=%2Fproject");
+    expect(init?.method).toBe("GET");
+    expect(result).toHaveLength(2);
+    expect(result[0]!.filename).toBe("add-auth.json");
+    expect(result[1]!.path).toBe("/project/plans/fix-bug.json");
   });
+
+  it("plansStatus calls GET /api/plans/status and returns PlanStatusResult", async () => {
+    // Given the backend returns task statuses
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tasks: [
+          { id: "task-1", state: "completed" },
+          { id: "task-2", state: "pending" }
+        ]
+      })
+    });
+    // When plansStatus is called
+    const result = await plansStatus("/project", "plans/add-auth.json");
+    // Then it calls GET /api/plans/status with projectRoot and planPath query params
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://localhost:1420/api/plans/status?projectRoot=%2Fproject&planPath=plans%2Fadd-auth.json");
+    expect(init?.method).toBe("GET");
+    expect(result.tasks).toHaveLength(2);
+    expect(result.tasks[0]!.id).toBe("task-1");
+    expect(result.tasks[0]!.state).toBe("completed");
+  });
+
 });

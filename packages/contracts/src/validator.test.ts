@@ -96,6 +96,30 @@ describe("validatePlanSchema", () => {
     expect(result.valid).toBe(false);
   });
 
+  it("accepts plan with valid task status field", async () => {
+    // Given a plan with a valid status on a task
+    const plan = {
+      ...basePlan,
+      tasks: [{ ...basePlan.tasks[0], status: "spec" }]
+    };
+    // When validated
+    const result = await validatePlanSchema(plan);
+    // Then it is accepted
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects plan with invalid task status value", async () => {
+    // Given a plan with an invalid status value on a task
+    const plan = {
+      ...basePlan,
+      tasks: [{ ...basePlan.tasks[0], status: "invalid" }]
+    };
+    // When validated
+    const result = await validatePlanSchema(plan);
+    // Then it is rejected
+    expect(result.valid).toBe(false);
+  });
+
   it("rejects legacy spec version", async () => {
     const invalid = {
       ...basePlan,
@@ -123,7 +147,7 @@ describe("validatePlanGraph", () => {
       ]
     };
 
-    const result = validatePlanGraph(plan, new Set(["implementation"]));
+    const result = validatePlanGraph(plan);
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.code === "unknown_dependency")).toBe(true);
   });
@@ -145,15 +169,9 @@ describe("validatePlanGraph", () => {
       ]
     };
 
-    const result = validatePlanGraph(plan, new Set(["implementation"]));
+    const result = validatePlanGraph(plan);
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.code === "cycle")).toBe(true);
-  });
-
-  it("rejects unknown task types", () => {
-    const result = validatePlanGraph(basePlan, new Set(["testing"]));
-    expect(result.valid).toBe(false);
-    expect(result.issues.some((issue) => issue.code === "unknown_task_type")).toBe(true);
   });
 
   it("rejects duplicate task ids", () => {
@@ -165,7 +183,7 @@ describe("validatePlanGraph", () => {
       ]
     };
 
-    const result = validatePlanGraph(plan, new Set(["implementation"]));
+    const result = validatePlanGraph(plan);
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.code === "duplicate_task")).toBe(true);
   });

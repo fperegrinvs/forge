@@ -2,18 +2,31 @@ use axum::{
     extract::{ws::{Message, WebSocket}, Path as AxumPath, Query, State, WebSocketUpgrade},
     http::StatusCode,
     response::IntoResponse,
+    response::sse::{Event, Sse},
     routing::{delete, get, post},
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, path::PathBuf};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::AppHandle;
 use tauri::Manager;
 use tower_http::services::ServeDir;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio_stream::wrappers::ReceiverStream;
+use uuid::Uuid;
 
-use crate::forge_cli::run_forge_json;
-use crate::packs::{compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs, read_bundled_packs, read_installed_packs};
+use crate::forge_cli::{run_forge_json, spawn_forge_stream};
+use crate::packs::{
+    compute_update_status, download_and_install_pack, fetch_packs_index, merge_bundled_packs,
+    read_bundled_packs, read_installed_packs, read_pack_content, PackContent,
+};
 use crate::terminal::TerminalManager;
 
 #[derive(Clone)]
@@ -22,6 +35,35 @@ struct ServerState {
     frontend_dist: PathBuf,
     bundled_packs_dir: Option<PathBuf>,
     terminal: TerminalManager,
+    run_streams: RunStreamHub,
+}
+
+#[derive(Clone, Default)]
+struct RunStreamHub {
+    inner: Arc<Mutex<HashMap<String, RunStreamControls>>>,
+}
+
+#[derive(Clone)]
+struct RunStreamControls {
+    input_tx: tokio::sync::mpsc::Sender<String>,
+    cancel_tx: tokio::sync::watch::Sender<bool>,
+}
+
+impl RunStreamHub {
+    fn insert(&self, id: String, controls: RunStreamControls) {
+        let mut guard = self.inner.lock().expect("run streams lock poisoned");
+        guard.insert(id, controls);
+    }
+
+    fn get(&self, id: &str) -> Option<RunStreamControls> {
+        let guard = self.inner.lock().expect("run streams lock poisoned");
+        guard.get(id).cloned()
+    }
+
+    fn remove(&self, id: &str) {
+        let mut guard = self.inner.lock().expect("run streams lock poisoned");
+        guard.remove(id);
+    }
 }
 
 fn resolve_bundled_packs_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -155,126 +197,257 @@ async fn plan_validate(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RunNextRequest {
+struct RunNextStreamQuery {
     project_root: String,
     plan_path: String,
     adapter: String,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RunNextResult {
-    state: String,
-    task_id: Option<String>,
-    run_id: Option<String>,
-    external_run_id: Option<String>,
-    resume_command: Option<String>,
-    message: String,
-}
-
-async fn run_next(
+async fn run_next_stream(
     State(state): State<ServerState>,
-    Json(body): Json<RunNextRequest>,
-) -> Result<Json<RunNextResult>, (StatusCode, String)> {
+    Query(query): Query<RunNextStreamQuery>,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
+{
+    let stream_id = Uuid::new_v4().to_string();
+    let (out_tx, out_rx) = tokio::sync::mpsc::channel::<String>(256);
+    let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel::<bool>(false);
+
+    state.run_streams.insert(
+        stream_id.clone(),
+        RunStreamControls {
+            input_tx,
+            cancel_tx,
+        },
+    );
+
     let app = state.app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(body.project_root);
+    let run_streams = state.run_streams.clone();
+    tokio::spawn(async move {
+        let _ = out_tx
+            .send(
+                serde_json::json!({
+                    "type": "sse.meta",
+                    "streamId": stream_id
+                })
+                .to_string(),
+            )
+            .await;
+
+        let cwd = PathBuf::from(&query.project_root);
         let args = vec![
             "run".to_string(),
             "next".to_string(),
             "--plan".to_string(),
-            body.plan_path,
+            query.plan_path,
             "--adapter".to_string(),
-            body.adapter,
-            "--json".to_string(),
+            query.adapter,
+            "--jsonl".to_string(),
         ];
 
-        let value = run_forge_json(&app, &cwd, &args)?;
-        Ok::<_, String>(RunNextResult {
-            state: value
-                .get("state")
-                .and_then(|v| v.as_str())
-                .unwrap_or("failed")
+        let mut child = match spawn_forge_stream(&app, &cwd, &args) {
+            Ok(c) => c,
+            Err(error) => {
+                let _ = out_tx
+                    .send(
+                        serde_json::json!({
+                            "type": "sse.error",
+                            "message": error
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                run_streams.remove(&stream_id);
+                return;
+            }
+        };
+
+        let mut stdin = match child.stdin.take() {
+            Some(s) => s,
+            None => {
+                let _ = out_tx
+                    .send(
+                        serde_json::json!({
+                            "type": "sse.error",
+                            "message": "child stdin missing"
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                run_streams.remove(&stream_id);
+                return;
+            }
+        };
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let mut stdout_lines = stdout.map(|s| BufReader::new(s).lines());
+        let mut stderr_lines = stderr.map(|s| BufReader::new(s).lines());
+
+        let pid = child.id();
+        let _ = out_tx
+            .send(
+                serde_json::json!({
+                    "type": "process.spawned",
+                    "pid": pid
+                })
                 .to_string(),
-            task_id: value.get("taskId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            run_id: value.get("runId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            external_run_id: value
-                .get("externalRunId")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            resume_command: value
-                .get("resumeCommand")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            message: value
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Run next")
+            )
+            .await;
+
+        loop {
+            // Cancel takes precedence.
+            if *cancel_rx.borrow() {
+                let _ = child.start_kill();
+                let _ = out_tx
+                    .send(
+                        serde_json::json!({
+                            "type": "process.killed",
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                break;
+            }
+
+            tokio::select! {
+                _ = cancel_rx.changed() => {
+                    // Loop will observe borrow() and kill.
+                }
+                maybe_input = input_rx.recv() => {
+                    if let Some(text) = maybe_input {
+                        let mut bytes = text.into_bytes();
+                        if !bytes.ends_with(b"\n") {
+                            bytes.push(b'\n');
+                        }
+                        let _ = stdin.write_all(&bytes).await;
+                        let _ = stdin.flush().await;
+                    }
+                }
+                res = async {
+                    if let Some(lines) = &mut stdout_lines {
+                        lines.next_line().await
+                    } else {
+                        Ok(None)
+                    }
+                } => {
+                    match res {
+                        Ok(Some(text)) => {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                let _ = out_tx.send(trimmed.to_string()).await;
+                            }
+                        }
+                        Ok(None) => {
+                            stdout_lines = None;
+                        }
+                        Err(error) => {
+                            let _ = out_tx
+                                .send(serde_json::json!({"type":"process.stdout_error","message": error.to_string()}).to_string())
+                                .await;
+                            stdout_lines = None;
+                        }
+                    }
+                }
+                res = async {
+                    if let Some(lines) = &mut stderr_lines {
+                        lines.next_line().await
+                    } else {
+                        Ok(None)
+                    }
+                } => {
+                    match res {
+                        Ok(Some(text)) => {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                let _ = out_tx
+                                    .send(serde_json::json!({"type":"process.stderr","line": trimmed}).to_string())
+                                    .await;
+                            }
+                        }
+                        Ok(None) => {
+                            stderr_lines = None;
+                        }
+                        Err(error) => {
+                            let _ = out_tx
+                                .send(serde_json::json!({"type":"process.stderr_error","message": error.to_string()}).to_string())
+                                .await;
+                            stderr_lines = None;
+                        }
+                    }
+                }
+            }
+
+            if stdout_lines.is_none() && stderr_lines.is_none() {
+                break;
+            }
+        }
+
+        let status = child.wait().await.ok();
+        let code = status.as_ref().and_then(|s| s.code()).unwrap_or(-1);
+        let _ = out_tx
+            .send(
+                serde_json::json!({
+                    "type": "process.exit",
+                    "code": code
+                })
                 .to_string(),
-        })
-    })
-    .await
-    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
-    .map(Json)
-    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+            )
+            .await;
+
+        run_streams.remove(&stream_id);
+    });
+
+    let stream = ReceiverStream::new(out_rx).map(|line| Ok(Event::default().data(line)));
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ResumeRunRequest {
-    project_root: String,
-    plan_path: String,
-    run_id: String,
-    adapter: String,
+struct RunNextStreamInputRequest {
+    stream_id: String,
+    text: String,
 }
 
-async fn resume_run(
+async fn run_next_stream_input(
     State(state): State<ServerState>,
-    Json(body): Json<ResumeRunRequest>,
-) -> Result<Json<RunNextResult>, (StatusCode, String)> {
-    let app = state.app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let cwd = PathBuf::from(body.project_root);
-        let args = vec![
-            "run".to_string(),
-            "resume".to_string(),
-            "--plan".to_string(),
-            body.plan_path,
-            "--run-id".to_string(),
-            body.run_id,
-            "--adapter".to_string(),
-            body.adapter,
-            "--json".to_string(),
-        ];
+    Json(body): Json<RunNextStreamInputRequest>,
+) -> Result<Json<bool>, (StatusCode, String)> {
+    let controls = state
+        .run_streams
+        .get(&body.stream_id)
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "stream not found"))?;
+    controls
+        .input_tx
+        .send(body.text)
+        .await
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "stream input channel closed"))?;
+    Ok(Json(true))
+}
 
-        let value = run_forge_json(&app, &cwd, &args)?;
-        Ok::<_, String>(RunNextResult {
-            state: value
-                .get("state")
-                .and_then(|v| v.as_str())
-                .unwrap_or("failed")
-                .to_string(),
-            task_id: value.get("taskId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            run_id: value.get("runId").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            external_run_id: value
-                .get("externalRunId")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            resume_command: value
-                .get("resumeCommand")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            message: value
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Resume")
-                .to_string(),
-        })
-    })
-    .await
-    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
-    .map(Json)
-    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunNextStreamCancelRequest {
+    stream_id: String,
+}
+
+async fn run_next_stream_cancel(
+    State(state): State<ServerState>,
+    Json(body): Json<RunNextStreamCancelRequest>,
+) -> Result<Json<bool>, (StatusCode, String)> {
+    let controls = state
+        .run_streams
+        .get(&body.stream_id)
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "stream not found"))?;
+    controls
+        .cancel_tx
+        .send(true)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "stream cancel channel closed"))?;
+    Ok(Json(true))
 }
 
 #[derive(Deserialize)]
@@ -464,6 +637,25 @@ async fn packs_download(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct PackContentQuery {
+    pack_path: String,
+}
+
+async fn packs_get_content(
+    Query(query): Query<PackContentQuery>,
+) -> Result<Json<PackContent>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = PathBuf::from(query.pack_path);
+        read_pack_content(&dir)
+    })
+    .await
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {error:?}")))?
+    .map(Json)
+    .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProjectInstallGuidanceRequest {
     project_root: String,
     pack_path: String,
@@ -591,9 +783,137 @@ async fn select_folder() -> Json<SelectFolderResult> {
     })
 }
 
-async fn pause_run(Json(_body): Json<serde_json::Value>) -> impl IntoResponse {
-    // v1: pause is filesystem-mediated via the control-plane state; CLI pause isn't exposed yet.
-    Json(true)
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlansListQuery {
+    project_root: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanFileEntry {
+    filename: String,
+    path: String,
+}
+
+async fn plans_list(
+    Query(query): Query<PlansListQuery>,
+) -> Result<Json<Vec<PlanFileEntry>>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let plans_dir = PathBuf::from(&query.project_root).join("plans");
+        if !plans_dir.exists() {
+            return Ok::<_, String>(vec![]);
+        }
+        let mut entries = Vec::new();
+        let read_dir = std::fs::read_dir(&plans_dir)
+            .map_err(|e| format!("read plans dir: {e}"))?;
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    entries.push(PlanFileEntry {
+                        filename: filename.to_string(),
+                        path: path.to_string_lossy().to_string(),
+                    });
+                }
+            }
+        }
+        entries.sort_by(|a, b| a.filename.cmp(&b.filename));
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanStatusQuery {
+    project_root: String,
+    plan_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskStatus {
+    id: String,
+    state: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanStatusResult {
+    tasks: Vec<TaskStatus>,
+}
+
+async fn plans_status(
+    Query(query): Query<PlanStatusQuery>,
+) -> Result<Json<PlanStatusResult>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state_path = PathBuf::from(&query.project_root).join(".forge").join("state.json");
+        if !state_path.exists() {
+            return Ok::<_, String>(PlanStatusResult { tasks: vec![] });
+        }
+        let raw = std::fs::read_to_string(&state_path)
+            .map_err(|e| format!("read state.json: {e}"))?;
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("parse state.json: {e}"))?;
+
+        // state.json may scope by plan path: look for tasks under the plan key or at top level
+        let tasks_value = value
+            .get(&query.plan_path)
+            .and_then(|v| v.get("tasks"))
+            .or_else(|| value.get("tasks"));
+
+        let mut tasks = Vec::new();
+        if let Some(tasks_obj) = tasks_value.and_then(|v| v.as_object()) {
+            for (id, task_val) in tasks_obj {
+                let state = task_val
+                    .get("state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("pending")
+                    .to_string();
+                tasks.push(TaskStatus {
+                    id: id.clone(),
+                    state,
+                });
+            }
+        }
+        tasks.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(PlanStatusResult { tasks })
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanReadQuery {
+    plan_path: String,
+}
+
+async fn plans_read(
+    Query(query): Query<PlanReadQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&query.plan_path);
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|e| format!("read plan: {e}"))?;
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("parse plan: {e}"))?;
+        Ok::<_, String>(value)
+    })
+    .await
+    .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("join failed: {e:?}")))?
+    .map(Json)
+    .map_err(|e| api_error(StatusCode::BAD_REQUEST, e))
 }
 
 async fn terminal_spawn(
@@ -750,6 +1070,12 @@ struct DebugStatus {
     assets_dir_exists: bool,
 }
 
+async fn get_cwd() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::json!({ "cwd": cwd.to_string_lossy() })))
+}
+
 async fn debug_status(State(state): State<ServerState>) -> Json<DebugStatus> {
     let index_exists = state.frontend_dist.join("index.html").exists();
     let assets_dir_exists = state.frontend_dist.join("assets").is_dir();
@@ -771,21 +1097,27 @@ pub async fn serve(app: AppHandle) -> Result<(), String> {
         frontend_dist: frontend_dist.clone(),
         bundled_packs_dir,
         terminal: TerminalManager::new(),
+        run_streams: RunStreamHub::default(),
     };
     let api = Router::new()
+        .route("/api/cwd", get(get_cwd))
         .route("/api/debug/status", get(debug_status))
         .route("/api/plan/validate", post(plan_validate))
-        .route("/api/run/next", post(run_next))
-        .route("/api/run/resume", post(resume_run))
-        .route("/api/run/pause", post(pause_run))
+        .route("/api/run/next/stream", get(run_next_stream))
+        .route("/api/run/next/input", post(run_next_stream_input))
+        .route("/api/run/next/cancel", post(run_next_stream_cancel))
         .route("/api/evidence", get(get_evidence))
         .route("/api/project/guidance-status", get(project_get_guidance_status))
         .route("/api/packs/installed", get(packs_list_installed))
         .route("/api/packs/updates", get(packs_check_updates))
         .route("/api/packs/download", post(packs_download))
+        .route("/api/packs/content", get(packs_get_content))
         .route("/api/project/install-guidance", post(project_install_guidance))
         .route("/api/templates", get(list_templates))
         .route("/api/project/init", post(project_init))
+        .route("/api/plans/list", get(plans_list))
+        .route("/api/plans/status", get(plans_status))
+        .route("/api/plans/read", get(plans_read))
         .route("/api/dialog/select-folder", get(select_folder))
         .route("/api/terminal/spawn", post(terminal_spawn))
         .route("/api/terminal/:id", delete(terminal_kill))

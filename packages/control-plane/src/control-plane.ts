@@ -8,6 +8,10 @@ import { exists, writeJsonFile } from "@forge/shared-utils";
 import type { AdapterEvent, AgentAdapter, CheckResult, RunContext } from "@forge/shared-utils";
 import type { AdapterFactory, AdapterType, RunNextResult, RuntimeState, TaskState } from "./types.js";
 
+type RunNextHooks = {
+  onAdapterEvent?: (event: AdapterEvent) => void;
+};
+
 function buildDefaultAdapterFactory(): AdapterFactory {
   return (type: AdapterType): AgentAdapter => {
     if (type === "codex") {
@@ -65,15 +69,20 @@ export class ForgeControlPlane {
     this.evidenceRoot = join(this.workspaceRoot, ".forge", "evidence");
   }
 
-  async planValidate(planPath: string, checkRoot = join(this.workspaceRoot, "checks", "task-types")) {
+  private resolveApprovalMode(): NonNullable<RunContext["approvalMode"]> {
+    // Desktop/CI runs are often non-interactive. "suggest" can deadlock because adapters
+    // may prompt for approval but receive no stdin. Prefer full-auto when no TTY.
+    return process.stdin.isTTY ? "suggest" : "full-auto";
+  }
+
+  async planValidate(planPath: string) {
     const plan = await loadPlan(planPath);
     const schema = await validatePlanSchema(plan);
     if (!schema.valid) {
       return schema;
     }
 
-    const registry = await loadTaskTypeRegistry(checkRoot);
-    const graph = validatePlanGraph(plan, new Set(registry.keys()));
+    const graph = validatePlanGraph(plan);
     if (!graph.valid) {
       return graph;
     }
@@ -84,9 +93,10 @@ export class ForgeControlPlane {
   async runNext(
     planPath: string,
     adapterType: AdapterType,
-    checkRoot = join(this.workspaceRoot, "checks", "task-types")
+    checkRoot = join(this.workspaceRoot, "checks", "task-types"),
+    hooks?: RunNextHooks
   ): Promise<RunNextResult> {
-    const validation = await this.planValidate(planPath, checkRoot);
+    const validation = await this.planValidate(planPath);
     if (!validation.valid) {
       return {
         state: "failed",
@@ -96,18 +106,30 @@ export class ForgeControlPlane {
 
     const plan = await loadPlan(planPath);
     const state = await this.loadState(planPath, plan.tasks.map((task) => task.id));
-    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
 
-    if (pausedRun) {
-      const resumeCommand = buildResumeCommand(pausedRun.adapterType ?? adapterType, pausedRun.externalRunId);
-      return {
-        state: "paused",
-        runId: pausedRun.runId,
-        ...(pausedRun.taskId ? { taskId: pausedRun.taskId } : {}),
-        ...(pausedRun.externalRunId ? { externalRunId: pausedRun.externalRunId } : {}),
-        ...(resumeCommand ? { resumeCommand } : {}),
-        message: "Execution is paused; resume the run before continuing."
-      };
+    // Auto-resume: if paused, unlock state so the next task can proceed
+    if (state.pausedRun) {
+      if (state.pausedRun.taskId && state.tasks[state.pausedRun.taskId] === "paused") {
+        state.tasks[state.pausedRun.taskId] = "pending";
+      } else {
+        const pausedTaskId = Object.entries(state.tasks).find(([, s]) => s === "paused")?.[0];
+        if (pausedTaskId) state.tasks[pausedTaskId] = "pending";
+      }
+      delete state.pausedRun;
+      await this.saveState(state);
+    }
+
+    // Recover orphaned "running" tasks — if we're entering runNext, no run is active,
+    // so any "running" state is stale (e.g. from an interrupted previous run).
+    let recoveredRunning = false;
+    for (const [taskId, status] of Object.entries(state.tasks)) {
+      if (status === "running") {
+        state.tasks[taskId] = "pending";
+        recoveredRunning = true;
+      }
+    }
+    if (recoveredRunning) {
+      await this.saveState(state);
     }
 
     const nextTask = plan.tasks.find(
@@ -117,15 +139,6 @@ export class ForgeControlPlane {
     );
 
     if (!nextTask) {
-      const pausedTaskId = Object.entries(state.tasks).find(([, taskState]) => taskState === "paused")?.[0];
-      if (pausedTaskId) {
-        return {
-          taskId: pausedTaskId,
-          state: "paused",
-          message: "Execution is paused; resume the run before continuing."
-        };
-      }
-
       return {
         state: "completed",
         message: "No runnable tasks remain"
@@ -141,7 +154,7 @@ export class ForgeControlPlane {
       prompt: `${nextTask.name}\n\n${nextTask.description}`,
       workingDirectory: this.workspaceRoot,
       allowedTools: [],
-      approvalMode: "suggest"
+      approvalMode: this.resolveApprovalMode()
     };
 
     const startedRun = await adapter.startRun(runContext);
@@ -151,6 +164,7 @@ export class ForgeControlPlane {
 
     for await (const event of adapter.streamEvents(runId)) {
       events.push(event);
+      hooks?.onAdapterEvent?.(event);
     }
 
     if (!externalRunId) {
@@ -190,7 +204,6 @@ export class ForgeControlPlane {
         adapterType,
         ...(externalRunId ? { externalRunId } : {})
       };
-      state.pausedRunId = runId;
       await this.saveState(state);
       return {
         taskId: nextTask.id,
@@ -207,7 +220,6 @@ export class ForgeControlPlane {
 
     state.tasks[nextTask.id] = "completed";
     delete state.pausedRun;
-    delete state.pausedRunId;
     await this.saveState(state);
 
     return {
@@ -224,19 +236,17 @@ export class ForgeControlPlane {
   async pause(runId: string): Promise<void> {
     const state = await this.loadState("", []);
     state.pausedRun = { runId };
-    state.pausedRunId = runId;
     await this.saveState(state);
   }
 
   async resume(runId: string): Promise<boolean> {
     const state = await this.loadState("", []);
-    const pausedRun = state.pausedRun ?? (state.pausedRunId ? { runId: state.pausedRunId } : undefined);
-    if (!pausedRun || pausedRun.runId !== runId) {
+    if (!state.pausedRun || state.pausedRun.runId !== runId) {
       return false;
     }
 
-    if (pausedRun.taskId && state.tasks[pausedRun.taskId] === "paused") {
-      state.tasks[pausedRun.taskId] = "pending";
+    if (state.pausedRun.taskId && state.tasks[state.pausedRun.taskId] === "paused") {
+      state.tasks[state.pausedRun.taskId] = "pending";
     } else {
       const pausedTaskId = Object.entries(state.tasks).find(([, taskState]) => taskState === "paused")?.[0];
       if (pausedTaskId) {
@@ -245,7 +255,6 @@ export class ForgeControlPlane {
     }
 
     delete state.pausedRun;
-    delete state.pausedRunId;
     await this.saveState(state);
     return true;
   }
@@ -280,16 +289,16 @@ export class ForgeControlPlane {
     }
 
     const raw = await readFile(this.statePath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<RuntimeState>;
+    const parsed = JSON.parse(raw) as Partial<RuntimeState> & { pausedRunId?: string };
     const existing: RuntimeState = {
       planPath: typeof parsed.planPath === "string" ? parsed.planPath : planPath,
       tasks: parsed.tasks ?? {},
-      ...(parsed.pausedRun ? { pausedRun: parsed.pausedRun } : {}),
-      ...(parsed.pausedRunId ? { pausedRunId: parsed.pausedRunId } : {})
+      ...(parsed.pausedRun ? { pausedRun: parsed.pausedRun } : {})
     };
 
-    if (!existing.pausedRun && existing.pausedRunId) {
-      existing.pausedRun = { runId: existing.pausedRunId };
+    // Migrate legacy pausedRunId field from old state files
+    if (!existing.pausedRun && parsed.pausedRunId) {
+      existing.pausedRun = { runId: parsed.pausedRunId };
     }
 
     for (const id of taskIds) {

@@ -30,6 +30,9 @@ export type RunNextResult = {
   runId?: string;
   externalRunId?: string;
   resumeCommand?: string;
+  classification?: string;
+  checksSummary?: string[];
+  llmOutput?: string[];
   message: string;
 };
 
@@ -65,22 +68,25 @@ export async function planValidate(projectRoot: string, planPath: string): Promi
   });
 }
 
-export async function runNext(projectRoot: string, planPath: string, adapter: "codex" | "claude"): Promise<RunNextResult> {
-  return await apiJson<RunNextResult>("/api/run/next", {
+export function runNextStreamUrl(projectRoot: string, planPath: string, adapter: "codex" | "claude"): string {
+  const url = new URL("/api/run/next/stream", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  url.searchParams.set("planPath", planPath);
+  url.searchParams.set("adapter", adapter);
+  return url.toString();
+}
+
+export async function runNextStreamInput(streamId: string, text: string): Promise<boolean> {
+  return await apiJson<boolean>("/api/run/next/input", {
     method: "POST",
-    body: JSON.stringify({ projectRoot, planPath, adapter })
+    body: JSON.stringify({ streamId, text })
   });
 }
 
-export async function resumeRun(
-  projectRoot: string,
-  planPath: string,
-  runId: string,
-  adapter: "codex" | "claude"
-): Promise<RunNextResult> {
-  return await apiJson<RunNextResult>("/api/run/resume", {
+export async function runNextStreamCancel(streamId: string): Promise<boolean> {
+  return await apiJson<boolean>("/api/run/next/cancel", {
     method: "POST",
-    body: JSON.stringify({ projectRoot, planPath, runId, adapter })
+    body: JSON.stringify({ streamId })
   });
 }
 
@@ -153,14 +159,29 @@ export async function projectInit(request: ProjectInitRequest): Promise<ProjectI
   });
 }
 
+export async function getCwd(): Promise<string> {
+  const result = await apiJson<{ cwd: string }>("/api/cwd", { method: "GET" });
+  return result.cwd;
+}
+
 export async function selectFolder(): Promise<string | null> {
   const result = await apiJson<{ path: string | null }>("/api/dialog/select-folder", { method: "GET" });
   return result.path;
 }
 
-export async function pauseRun(runId: string): Promise<boolean> {
-  return await apiJson<boolean>("/api/run/pause", {
-    method: "POST",
-    body: JSON.stringify({ runId })
-  });
+export type PlanFileEntry = { filename: string; path: string };
+export type TaskStatus = { id: string; state: string };
+export type PlanStatusResult = { tasks: TaskStatus[] };
+
+export async function plansList(projectRoot: string): Promise<PlanFileEntry[]> {
+  const url = new URL("/api/plans/list", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  return await apiJson<PlanFileEntry[]>(url.toString(), { method: "GET" });
+}
+
+export async function plansStatus(projectRoot: string, planPath: string): Promise<PlanStatusResult> {
+  const url = new URL("/api/plans/status", window.location.origin);
+  url.searchParams.set("projectRoot", projectRoot);
+  url.searchParams.set("planPath", planPath);
+  return await apiJson<PlanStatusResult>(url.toString(), { method: "GET" });
 }
