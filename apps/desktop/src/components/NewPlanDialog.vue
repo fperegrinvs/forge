@@ -12,7 +12,7 @@
             <h3 class="text-subtitle-1 mb-2">Instructions</h3>
             <ol class="text-body-2">
               <li class="mb-2">
-                The terminal on the right is running <strong>{{ adapter }}</strong>.
+                The terminal on the right is running <strong>{{ adapterLabel }}</strong>.
               </li>
               <li class="mb-2">
                 {{ skillInstruction }} to start guided plan creation.
@@ -89,7 +89,7 @@
       <v-card-actions class="flex-shrink-0">
         <v-spacer />
         <v-btn variant="text" @click="onClose">Cancel</v-btn>
-        <v-btn v-if="newPlans.length" color="success" @click="onUsePlan(newPlans[newPlans.length - 1])">Use Plan</v-btn>
+        <v-btn v-if="newPlans.length" color="success" @click="onUsePlan(newPlans[0])">Use Plan</v-btn>
         <v-btn color="primary" @click="onDone">Done</v-btn>
       </v-card-actions>
     </v-card>
@@ -124,6 +124,11 @@ const emit = defineEmits<{
 const open = defineModel<boolean>({ default: false });
 
 const skillInstruction = computed(() => getSkillInvocation(props.adapter));
+const adapterLabel = computed(() => {
+  if (props.adapter === "claude") return "Claude Code";
+  if (props.adapter === "codex") return "Codex";
+  return props.adapter;
+});
 
 const showInstructions = ref(true);
 const dialogWidth = ref(1000);

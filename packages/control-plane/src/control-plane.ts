@@ -48,6 +48,10 @@ function buildResumeCommand(adapterType: AdapterType, externalRunId?: string): s
     return `codex resume ${externalRunId}`;
   }
 
+  if (adapterType === "claude" && externalRunId) {
+    return `claude --resume ${externalRunId}`;
+  }
+
   return undefined;
 }
 

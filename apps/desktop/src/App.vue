@@ -25,7 +25,7 @@
                 <v-card class="pa-4 mb-4">
                   <v-text-field v-model="projectRoot" label="Project root" density="comfortable" readonly @click="onBrowseProjectRoot">
                     <template #append>
-                      <v-btn size="small" variant="text" @click="onBrowseProjectRoot">Browse</v-btn>
+                      <v-btn size="small" variant="text" @click.stop="onBrowseProjectRoot">Browse</v-btn>
                     </template>
                   </v-text-field>
                   <v-text-field v-model="planPath" label="Plan path (relative to project root)" density="comfortable" />
@@ -46,11 +46,10 @@
                     </v-chip-group>
                   </div>
 
-                  <v-select v-model="adapter" :items="['codex', 'claude']" label="Adapter" density="comfortable" />
+                  <v-select v-model="adapter" :items="adapterOptions" item-title="title" item-value="value" label="Adapter" density="comfortable" />
 
                   <div class="d-flex flex-wrap ga-2">
                     <v-btn color="primary" variant="outlined" prepend-icon="mdi-file-document-plus-outline" @click="showNewPlan = true">New Plan</v-btn>
-                    <v-btn color="primary" @click="onValidate">Validate Plan</v-btn>
                     <v-btn color="primary" variant="outlined" @click="onRunNextStream">Run</v-btn>
                     <v-btn color="secondary" variant="outlined" @click="onOpenEvidence">Open Evidence</v-btn>
                   </div>
@@ -144,7 +143,7 @@
                   <h2 class="text-h6 mb-3">Guidance Pack</h2>
                   <v-text-field v-model="projectRoot" label="Project root" density="comfortable" readonly @click="onBrowseProjectRoot">
                     <template #append>
-                      <v-btn size="small" variant="text" @click="onBrowseProjectRoot">Browse</v-btn>
+                      <v-btn size="small" variant="text" @click.stop="onBrowseProjectRoot">Browse</v-btn>
                     </template>
                   </v-text-field>
 
@@ -253,11 +252,16 @@ const tab = ref<"orchestrate" | "packs">("orchestrate");
 const showCreateProject = ref(false);
 const showNewPlan = ref(false);
 const adapter = ref<"codex" | "claude">("codex");
+const adapterOptions = [
+  { title: "Codex", value: "codex" as const },
+  { title: "Claude Code", value: "claude" as const }
+];
 const projectRoot = ref(".");
 const planPath = ref("./plan.json");
-const validationSummary = ref("No validation run yet");
 const logs = ref<string[]>([]);
 const evidence = ref<string[]>([]);
+
+const LAST_PROJECT_ROOT_KEY = "forge.desktop.lastProjectRoot";
 
 const guidanceStatus = ref<ProjectGuidanceStatus>();
 const guidanceError = ref<string>("");
@@ -319,14 +323,24 @@ type DiscoveredPlan = {
 const discoveredPlans = ref<DiscoveredPlan[]>([]);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
+const selectedDiscoveredPlan = computed(() => discoveredPlans.value.find((p) => p.path === planPath.value));
+
 const selectedPlanStatuses = computed(() => {
-  const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
-  return selected?.taskStatuses ?? [];
+  return selectedDiscoveredPlan.value?.taskStatuses ?? [];
 });
 
 const selectedPlanIssues = computed(() => {
-  const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
-  return selected?.issues ?? [];
+  return selectedDiscoveredPlan.value?.issues ?? [];
+});
+
+const validationSummary = computed(() => {
+  if (!planPath.value) return "No plan selected";
+  const selected = selectedDiscoveredPlan.value;
+  if (!selected) return "Plan not discovered yet";
+  if (selected.validating) return "Validating...";
+  if (selected.valid === true) return "Plan valid";
+  if (selected.valid === false) return `Plan invalid (${selected.issues.length} issues)`;
+  return "Plan not validated yet";
 });
 
 onMounted(async () => {
@@ -362,8 +376,10 @@ async function pollPlans(): Promise<void> {
             plan.valid = r.valid;
             plan.issues = r.issues;
           })
-          .catch(() => {
+          .catch((error) => {
             plan.valid = false;
+            plan.issues = [{ path: "", code: "validation_failed", message: String(error) }];
+            pushLog(`Plan validation failed (${plan.filename}): ${String(error)}`);
           })
           .finally(() => {
             plan.validating = false;
@@ -414,10 +430,22 @@ onUnmounted(() => {
 
 // Resolve cwd on startup, then start polling
 onMounted(async () => {
-  try {
-    projectRoot.value = await getCwd();
-  } catch {
-    // fall back to "." if cwd resolution fails
+  const saved = (() => {
+    try {
+      return localStorage.getItem(LAST_PROJECT_ROOT_KEY) || "";
+    } catch {
+      return "";
+    }
+  })();
+
+  if (saved.trim()) {
+    projectRoot.value = saved.trim();
+  } else {
+    try {
+      projectRoot.value = await getCwd();
+    } catch {
+      // fall back to "." if cwd resolution fails
+    }
   }
   if (tab.value === "orchestrate") {
     startPolling();
@@ -427,6 +455,23 @@ onMounted(async () => {
 function onSelectPlan(plan: DiscoveredPlan): void {
   planPath.value = plan.path;
   logs.value.unshift(`Selected plan: ${plan.filename}`);
+
+  if (!plan.validating) {
+    plan.validating = true;
+    planValidate(projectRoot.value, plan.path)
+      .then((r) => {
+        plan.valid = r.valid;
+        plan.issues = r.issues;
+      })
+      .catch((error) => {
+        plan.valid = false;
+        plan.issues = [{ path: "", code: "validation_failed", message: String(error) }];
+        pushLog(`Plan validation failed (${plan.filename}): ${String(error)}`);
+      })
+      .finally(() => {
+        plan.validating = false;
+      });
+  }
 
   // Fetch task statuses
   plansStatus(projectRoot.value, plan.path)
@@ -443,6 +488,11 @@ async function onBrowseProjectRoot(): Promise<void> {
     const folder = await selectFolder();
     if (folder) {
       projectRoot.value = folder;
+      try {
+        localStorage.setItem(LAST_PROJECT_ROOT_KEY, folder);
+      } catch {
+        // best-effort
+      }
     }
   } catch (error) {
     logs.value.unshift(`Folder picker failed: ${String(error)}`);
@@ -451,6 +501,11 @@ async function onBrowseProjectRoot(): Promise<void> {
 
 function onProjectCreated(newProjectRoot: string): void {
   projectRoot.value = newProjectRoot;
+  try {
+    localStorage.setItem(LAST_PROJECT_ROOT_KEY, newProjectRoot);
+  } catch {
+    // best-effort
+  }
   tab.value = "orchestrate";
   logs.value.unshift(`Project created: ${newProjectRoot}`);
 }
@@ -464,22 +519,30 @@ function onPlanCreated(planPathArg?: string): void {
       return;
     }
   }
-  logs.value.unshift("Plan created via guided flow — validate to load");
+  logs.value.unshift("Plan created via guided flow");
 }
 
-async function onValidate(): Promise<void> {
+async function ensurePlanValidForRun(): Promise<boolean> {
   try {
     const result = await planValidate(projectRoot.value, planPath.value);
-    validationSummary.value = result.valid ? "Plan valid" : `Plan invalid (${result.issues.length} issues)`;
-    const selected = discoveredPlans.value.find((p) => p.path === planPath.value);
+    const selected = selectedDiscoveredPlan.value;
     if (selected) {
       selected.valid = result.valid;
       selected.issues = result.issues;
     }
-    logs.value.unshift(`Validate Plan -> ${validationSummary.value}`);
+    if (!result.valid) {
+      pushLog(`Run blocked: plan invalid (${result.issues.length} issues)`);
+      return false;
+    }
+    return true;
   } catch (error) {
-    validationSummary.value = "Plan validation failed";
-    logs.value.unshift(`Validate Plan -> error: ${String(error)}`);
+    const selected = selectedDiscoveredPlan.value;
+    if (selected) {
+      selected.valid = false;
+      selected.issues = [{ path: "", code: "validation_failed", message: String(error) }];
+    }
+    pushLog(`Run blocked: plan validation failed (${String(error)})`);
+    return false;
   }
 }
 
@@ -501,6 +564,13 @@ function pushLog(line: string): void {
 async function onRunNextStream(): Promise<void> {
   stopStream();
   clearLiveOutput();
+
+  const valid = await ensurePlanValidForRun();
+  if (!valid) {
+    current.state = "idle";
+    current.message = "Plan invalid";
+    return;
+  }
 
   current.state = "running";
   current.taskId = undefined;
